@@ -1,0 +1,15 @@
+^\.env($|\.)
+^AGENTS\.md$
+^archive$
+^response\.md$
+^patches$
+^\.git$
+^\.gitignore$
+^\.agents$
+^\.codex$
+^.*\.Rproj$
+^\.Rproj\.user$
+^\.Rhistory$
+^\.RData$
+^.*\.tar\.gz$
+^.*\.Rcheck$
