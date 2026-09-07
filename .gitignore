@@ -1,0 +1,14 @@
+/output/
+archive/
+.Rbuildignore
+.env
+.env.*
+AGENTS.md
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
+*.rds
+*.RDS
+*.log
+*.tar.gz

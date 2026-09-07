@@ -13,3 +13,5 @@
 ^\.RData$
 ^.*\.tar\.gz$
 ^.*\.Rcheck$
+^extras/datashield$
+^output$

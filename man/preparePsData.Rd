@@ -2,7 +2,7 @@
 % Please edit documentation in R/PreparePsData.R
 \name{preparePsData}
 \alias{preparePsData}
-\title{Prepare fixed synthetic propensity score inputs}
+\title{Prepare fixed propensity score inputs}
 \usage{
 preparePsData(sites, covariateIds, scales)
 }
@@ -25,10 +25,10 @@ The caller must use \code{Andromeda::close()} on each site's \code{cohortMethodD
 when finished.
 }
 \description{
-Prepare fixed synthetic propensity score inputs
+Prepare fixed propensity score inputs
 }
 \details{
-This boundary is for synthetic inputs, not CDM extraction. Feature meanings
+This boundary accepts extracted inputs; it does not query a CDM. Feature meanings
 must agree across sites. Only globally zero features are excluded; a feature
 absent from one site is retained. Scaling is supplied, not estimated.
 

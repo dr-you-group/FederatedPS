@@ -1,13 +1,16 @@
 Package: FederatedPs
-Title: Synthetic Propensity Score Checks with Cyclops Coordinate Descent
+Title: Propensity Score Checks with Cyclops Coordinate Descent
 Version: 0.0.1
 Authors@R: person("Younwoo", "Ki", email = "dewonsunrise@gmail.com",
     role = c("aut", "cre"))
-Description: Prepares fixed synthetic sparse propensity score inputs and compares
-    local, pooled, and two-state coordinate descent in one R process. Reuses
-    Cyclops calculation APIs and supplies the data structure used by CohortMethod
-    matching and covariate balance. Simulation requires a separately patched
-    Cyclops installation; no remote execution or database extraction is provided.
+Description: Prepares sparse propensity score inputs and compares local,
+    pooled, and two-state coordinate descent in one R process. Reuses Cyclops
+    calculation APIs and the data structure used by CohortMethod matching and
+    covariate balance. A research DataSHIELD interface jointly updates persistent
+    server states with synthetic inputs or explicitly enabled, protected local
+    inputs. Coordinate fitting requires a separately patched Cyclops installation.
+    Database extraction is a separate research driver; clinical outcome analysis
+    is not provided.
 License: Apache License (== 2.0)
 Encoding: UTF-8
 Depends: R (>= 4.1.0)
@@ -19,9 +22,17 @@ Imports:
     methods,
     stats
 Suggests:
+    DSI (>= 1.8.0),
+    DSOpal (>= 1.5.0),
     dplyr,
     ggplot2,
+    opalr (>= 3.6.1),
     testthat (>= 3.0.0)
 Config/testthat/edition: 3
 Roxygen: list(markdown = TRUE)
-Config/roxygen2/version: 8.0.0
+Config/roxygen2/version: 8.1.0
+AssignMethods: loadPsSyntheticDS, initializePsSiteDS, updatePsSiteDS,
+    checkPsSiteConvergenceDS, evaluatePsSiteDS, preparePsCvDS, loadPsCdmDS,
+    applyPsPreprocessingDS, setPsPriorDS
+AggregateMethods: getPsSiteStatisticsDS, getPsSiteStatusDS, checkPsPrecisionDS,
+    getPsSiteEvaluationDS, getPsPreprocessingDS, getPsValidationDS

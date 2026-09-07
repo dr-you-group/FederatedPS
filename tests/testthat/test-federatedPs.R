@@ -91,7 +91,19 @@ if (nzchar(referenceOutput)) {
                  missingApi = missingApi, cyclopsPath = find.package("Cyclops")), referenceOutput)
     b1Close(prepared)
     cat("B1_REFERENCE", find.package("Cyclops"), "SUCCESS\n")
-} else {
+} else if (!identical(Sys.getenv("FEDERATEDPS_SETUP_ONLY"), "true")) {
+    test_that("local pooled and simulation still reject nonconvergence", {
+        prepared <- b1Prepare(b1Fixture())
+        on.exit(b1Close(prepared), add = TRUE)
+        control <- b1Settings$control
+        control$maxIterations <- 1L
+        initial <- stats::setNames(rep(0, length(prepared$covariateIds) + 1L),
+            c("(Intercept)", as.character(prepared$covariateIds)))
+        for (method in c("local", "pooled", "simulation")) {
+            expect_error(fitPs(prepared, method, b1Settings$variance,
+                do.call(Cyclops::createControl, control), initial), "did not converge: MAX_ITERATIONS")
+        }
+    })
     test_that("OHDSI tables and sparse row/feature maps remain aligned", {
         fixture <- b1Fixture()
         prepared <- b1Prepare(fixture)
