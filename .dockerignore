@@ -1,0 +1,13 @@
+*
+!DESCRIPTION
+!NAMESPACE
+!R/
+!R/**
+!man/
+!man/**
+!DockerImage/
+!DockerImage/Dockerfile
+!extras/
+!extras/*.R
+!FederatedPs.Rproj
+!README.md

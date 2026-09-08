@@ -1,0 +1,33 @@
+test_that("pda exchanges preserve double precision and wait for completed writes", {
+    directory <- tempfile("pda-")
+    dir.create(directory)
+    on.exit(unlink(directory, recursive = TRUE))
+    config <- pda::getCloudConfig("site1", dir = directory)
+    values <- c(1 / 3, 1e-19, pi, 1e12 + 0.1234)
+    expect_message(.putPs(values, "statistics", config), NA)
+    expect_identical(.getPs("statistics", config, 1), values)
+    expect_error(.getPs("missing", config, 0), "Timed out")
+    expect_error(fitPs(NULL, data.frame(rowId = c(1, 1), treatment = 0:1), 1), "rowId")
+})
+
+test_that("cross-hospital feature and coordinate disagreements stop aggregation", {
+    directory <- tempfile("pda-")
+    dir.create(directory)
+    on.exit(unlink(directory, recursive = TRUE))
+    config <- pda::getCloudConfig("aggregator", dir = directory)
+    packet <- list(coordinate = -1L, statistics = list(specification = list(features = c("1", "2")),
+        reference = data.frame(covariateId = 1, analysisId = 1), present = c(TRUE, TRUE)))
+    .putPs(packet, "features_0_site1", config)
+    packet$statistics$specification$features <- c("2", "1")
+    .putPs(packet, "features_0_site2", config)
+    expect_error(aggregatePs(config, c("site1", "site2"), "features"), "features, scales")
+    packet$statistics$specification <- list(features = c("1", "2"),
+        cohorts = list(targetId = 1545958, comparatorId = 1539403))
+    .putPs(packet, "cohorts_0_site1", config)
+    packet$statistics$specification$cohorts <- list(targetId = 1539403, comparatorId = 1545958)
+    .putPs(packet, "cohorts_0_site2", config)
+    expect_error(aggregatePs(config, c("site1", "site2"), "cohorts"), "fitting settings")
+    .putPs(list(coordinate = 1, statistics = c(1, 2, 0, 2)), "state_0_site1", config)
+    .putPs(list(coordinate = 2, statistics = c(1, 2, 0, 2)), "state_0_site2", config)
+    expect_error(aggregatePs(config, c("site1", "site2"), "state"), "coordinate states")
+})

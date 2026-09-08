@@ -1,0 +1,6 @@
+PGHOST=host.docker.internal
+PGPORT=5432
+PGDATABASE=ohdsi
+PGUSER=
+PGPASSWORD=
+CDM_DATABASE_SCHEMA=mimiciv

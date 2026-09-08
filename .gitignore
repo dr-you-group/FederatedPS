@@ -1,14 +1,39 @@
-/output/
-archive/
-.Rbuildignore
+# Local connection and RStudio settings
 .env
 .env.*
+!.env.example
+.Renviron
+.Renviron.*
+!.Renviron.*.example
+
+# Local data, experiments and reference material
+/output/
+/input/
+/exchange/
+/work/
+/experiment/
+/presentations/
+/archive/
+/jdbc/
+/extras/sql/CohortFeasibility.sql
+
+# Editor and agent state
 AGENTS.md
+.agents/
+.codex/
 .Rhistory
 .RData
 .Ruserdata
 .Rproj.user/
+__pycache__/
+.DS_Store
+
+# Build outputs and local documents
+*.Rcheck/
+*.tar.gz
 *.rds
 *.RDS
 *.log
-*.tar.gz
+*.pdf
+*.pptx
+*.docx

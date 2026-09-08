@@ -2,48 +2,56 @@
 % Please edit documentation in R/FederatedPs.R
 \name{fitPs}
 \alias{fitPs}
-\title{Fit propensity scores on fixed inputs in one R process}
+\title{Fit a plaintext federated propensity score model at one hospital}
 \usage{
 fitPs(
-  data,
-  method = c("simulation", "pooled", "local"),
+  cohortMethodData,
+  population = NULL,
+  covariateIds = NULL,
+  scales = rep(1, length(covariateIds)),
+  config,
+  runId,
   priorVariance = 1,
   control = Cyclops::createControl(convergenceType = "lange"),
-  startingCoefficients
+  startingCoefficients = rep(0, length(covariateIds) + 1L),
+  timeout = 300
 )
 }
 \arguments{
-\item{data}{Output of \code{\link{preparePsData}}.}
+\item{cohortMethodData}{Hospital-local \link[CohortMethod:CohortMethodData]{CohortMethod::CohortMethodData}.}
 
-\item{method}{\code{"simulation"} jointly updates two local Cyclops states in this
-process; \code{"pooled"} and \code{"local"} use the existing normal Cyclops fit.}
+\item{population}{Study population with unique \code{rowId} and binary \code{treatment}.
+Defaults to the cohorts in \code{cohortMethodData}.}
 
-\item{priorVariance}{One finite positive, fixed Laplace variance.}
+\item{covariateIds}{Common feature IDs in training order. \code{NULL} uses the
+sorted union of feature IDs reported by the hospitals.}
 
-\item{control}{Cyclops CPU CCD control using Lange convergence, one thread,
-and no screening or cross-validation.}
+\item{scales}{Common positive divisors in the same feature order.}
 
-\item{startingCoefficients}{Finite coefficients named exactly
-\code{c("(Intercept)", as.character(data$covariateIds))} after zero exclusion.}
+\item{config}{Hospital configuration from \code{\link[pda:getCloudConfig]{pda::getCloudConfig()}}.}
+
+\item{runId}{New alphanumeric identifier shared with the aggregator.}
+
+\item{priorVariance}{Fixed Laplace variance. The intercept is unpenalized.}
+
+\item{control}{\code{\link[Cyclops:createControl]{Cyclops::createControl()}} settings for Lange CPU CCD.}
+
+\item{startingCoefficients}{Common initial coefficients, intercept first.}
+
+\item{timeout}{Seconds to wait for each exchange.}
 }
 \value{
-A list containing \code{populations}, plain numeric \code{models} diagnostics,
-\code{method}, \code{rowMap}, \code{excludedIds}, and the loaded \code{cyclopsPath}. Models have
-coefficients, iterations, return flag, log likelihood, log prior, and
-negative log-posterior \code{objective}. Native states are not returned or saved.
+The input population with \code{propensityScore} and model coefficients
+in its \code{metaData} attribute. Patient rows and PS remain at this hospital.
 }
 \description{
-Fit propensity scores on fixed inputs in one R process
+Fit a plaintext federated propensity score model at one hospital
 }
 \details{
-This function is a same-process synthetic simulation, not remote federated
-execution. Simulation checks the five patched exports once per invocation;
-a version string alone cannot identify the required Cyclops build. No silent
-fallback, installation, or private Cyclops calls are used.
-
-Local likelihoods are summed and the common prior is included once in the
-global objective. The existing Lange stopping rule is not a KKT threshold.
-State agreement uses fixed absolute and relative tolerances of \code{1e-10}.
-Final PS values are raw existing Cyclops predictions joined by explicit row
-keys to the original population, preserving its columns, order, and metadata.
+Run \code{aggregatePs()} and one \code{fitPs()} call per hospital concurrently.
+Inputs must use the same feature definitions and absent-value-as-zero
+encoding. Scaling is supplied, not estimated separately at each hospital.
+Only globally zero columns are removed. No sampling or cross-validation
+is performed. The caller retains ownership of \code{cohortMethodData} and must
+close it with \code{Andromeda::close()} when finished.
 }

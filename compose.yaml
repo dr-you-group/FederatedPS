@@ -1,0 +1,68 @@
+services:
+  aggregator:
+    image: federatedps-rstudio:local
+    build:
+      context: .
+      dockerfile: DockerImage/Dockerfile
+    ports:
+      - "127.0.0.1:38787:8787"
+    environment:
+      PASSWORD: ${RSTUDIO_PASSWORD:?Set RSTUDIO_PASSWORD in .env}
+      USERID: ${RSTUDIO_UID:-1000}
+      GROUPID: ${RSTUDIO_GID:-1000}
+      FEDERATEDPS_SITE: aggregator
+      FEDERATEDPS_RUN: ${FEDERATEDPS_RUN:?Use python start.py}
+      PDA_DIR: /exchange
+    volumes:
+      - exchange:/exchange
+      - ./work/aggregator:/home/rstudio/FederatedPs/work
+    networks:
+      - aggregator
+
+  mimic:
+    image: federatedps-rstudio:local
+    ports:
+      - "127.0.0.1:38788:8787"
+    environment:
+      PASSWORD: ${MIMIC_RSTUDIO_PASSWORD:?Set MIMIC_RSTUDIO_PASSWORD in .env}
+      USERID: ${RSTUDIO_UID:-1000}
+      GROUPID: ${RSTUDIO_GID:-1000}
+      FEDERATEDPS_SITE: mimic
+      FEDERATEDPS_RUN: ${FEDERATEDPS_RUN:?Use python start.py}
+      PDA_DIR: /exchange
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./.Renviron.mimic:/home/rstudio/FederatedPs/.Renviron.mimic:ro
+      - ./work/mimic:/home/rstudio/FederatedPs/work
+      - exchange:/exchange
+    networks:
+      - mimic
+
+  synpuf:
+    image: federatedps-rstudio:local
+    ports:
+      - "127.0.0.1:38789:8787"
+    environment:
+      PASSWORD: ${SYNPUF_RSTUDIO_PASSWORD:?Set SYNPUF_RSTUDIO_PASSWORD in .env}
+      USERID: ${RSTUDIO_UID:-1000}
+      GROUPID: ${RSTUDIO_GID:-1000}
+      FEDERATEDPS_SITE: synpuf
+      FEDERATEDPS_RUN: ${FEDERATEDPS_RUN:?Use python start.py}
+      PDA_DIR: /exchange
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./.Renviron.synpuf:/home/rstudio/FederatedPs/.Renviron.synpuf:ro
+      - ./work/synpuf:/home/rstudio/FederatedPs/work
+      - exchange:/exchange
+    networks:
+      - synpuf
+
+volumes:
+  exchange: {}
+
+networks:
+  aggregator: {}
+  mimic: {}
+  synpuf: {}
