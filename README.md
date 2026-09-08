@@ -1,79 +1,160 @@
 FederatedPs
 ===========
 
-CohortMethod 데이터로 plaintext federated PS를 적합한다. 각 병원의 gradient/Hessian을
-pda로 합산하고 Cyclops의 Bayesian LASSO/CCD로 업데이트한다. 환자 행과 PS는 병원에 남는다.
-공식 OHDSI 패키지는 아니며, CohortMethod 데이터와 matching·balance 함수를 사용한다.
+FederatedPs is an R package for plaintext federated propensity score estimation
+from CohortMethod data. Hospitals fit a shared Bayesian lasso logistic regression
+model using Cyclops coordinate descent and pda. Feature metadata
+and coordinate statistics are shared; patient rows and propensity scores remain
+at each hospital.
+
+Requirements
+============
+
+- R 4.1.0 or newer. Package dependencies are declared in `DESCRIPTION`, including
+  the required [Cyclops fork](https://github.com/dr-you-group/Cyclops) pinned to
+  a specific commit.
+- Docker with Docker Compose and Python 3 for the included Web RStudio setup.
+- PostgreSQL OMOP CDM datasets for the MIMIC and SynPUF example, with read access
+  to their CDM and vocabulary tables.
+
+The Docker image provides R 4.6.1, Java, the PostgreSQL JDBC driver and the
+required R packages.
 
 Installation
 ============
 
-R 패키지는 다음 명령으로 설치한다.
+To install the R package:
 
 ```r
 install.packages("remotes")
 remotes::install_github("dr-you-group/FederatedPS")
 ```
 
-Docker, Docker Compose와 Python 3가 필요하다. 최초 설정 시 아래 파일을 복사하고
-세 RStudio 비밀번호와 각 DB 계정을 입력한다. 실제 설정 파일은 Git에서 제외한다.
-
-```sh
-cp .env.example .env
-cp .Renviron.mimic.example .Renviron.mimic
-cp .Renviron.synpuf.example .Renviron.synpuf
-chmod 600 .env .Renviron.mimic .Renviron.synpuf
-python3 start.py
-```
-
-| 역할 | RStudio | 로컬 CDM | 연결 설정 |
-| --- | --- | --- | --- |
-| Aggregator | http://localhost:38787 | 없음 | 없음 |
-| MIMIC | http://localhost:38788 | `ohdsi.mimiciv` | `.Renviron.mimic` |
-| SynPUF | http://localhost:38789 | `ohdsi.synpuf23` | `.Renviron.synpuf` |
-
-각 환경은 별도 컨테이너와 Docker network에서 실행된다. 사이트는 자기 DB 설정과
-`work/<site>`만 마운트한다. pda 모델·통계량은 Docker의 `federatedps-slides_exchange`
-volume으로 교환한다. 작은 파일을 반복 교환하므로 호스트 폴더 대신 이 volume을 사용한다.
-DB 접근 범위는 각 DB 계정의 권한으로 제한한다. `PGHOST`에는 컨테이너에서 접근할
-수 있는 DB 주소를 지정한다. R 패키지, JDBC 드라이버와 `DESCRIPTION`에 고정된
-[Cyclops fork](https://github.com/dr-you-group/Cyclops)는 이미지에 설치된다.
+Access to a private repository requires a `GITHUB_PAT` with read permission.
+The Docker workflow below builds and installs the package from a local checkout.
 
 How to run
 ==========
 
-`rstudio`로 로그인하여 `/home/rstudio/FederatedPs/FederatedPs.Rproj`를 연다.
-같은 실행의 세 세션에서 다음 스크립트를 실행한다.
+1. From the repository root, copy the example settings:
 
-```r
-# Aggregator
-source("extras/RunAggregator.R")
+   ```sh
+   cp .env.example .env
+   cp .Renviron.mimic.example .Renviron.mimic
+   cp .Renviron.synpuf.example .Renviron.synpuf
+   chmod 600 .env .Renviron.mimic .Renviron.synpuf
+   ```
 
-# MIMIC 및 SynPUF: 각각 자기 RStudio에서 실행
-source("extras/CodeToRun.R")
+   Set the three RStudio passwords in `.env` and each site's database settings
+   in its `.Renviron` file. Set `PGHOST` to a database address reachable from
+   that site's container. Local settings are excluded from Git.
+
+2. Build the image and start the three RStudio environments:
+
+   ```sh
+   python3 start.py
+   ```
+
+   | Role | RStudio | Example CDM | Connection settings |
+   | --- | --- | --- | --- |
+   | Aggregator | http://localhost:38787 | None | None |
+   | MIMIC | http://localhost:38788 | `ohdsi.mimiciv` | `.Renviron.mimic` |
+   | SynPUF | http://localhost:38789 | `ohdsi.synpuf23` | `.Renviron.synpuf` |
+
+   Each role has its own container, Docker network and `work/<role>` folder.
+   Each hospital receives its own connection settings; database permissions
+   determine its access. pda messages use a shared Docker volume.
+
+3. Log in as `rstudio` with the password for that environment and open
+   `/home/rstudio/FederatedPs/FederatedPs.Rproj`.
+
+4. Run the aggregator script in the aggregator session:
+
+   ```r
+   source("extras/RunAggregator.R")
+   ```
+
+   While it waits for the hospitals, run the site script in both hospital
+   sessions:
+
+   ```r
+   source("extras/CodeToRun.R")
+   ```
+
+   All three sessions use the run ID assigned by `start.py`. Run
+   `python3 start.py` again before starting a new fit.
+
+Example cohort and model
+========================
+
+`extras/CodeToRun.R` uses CohortMethod's `drug_era` pathway to select patients
+aged 65 or older at their first recorded use of atorvastatin (1545958) or
+simvastatin (1539403). CohortMethod excludes same-day use of both drugs. A
+separate cohort table is not required.
+
+Covariates include age group, sex, and condition, drug, procedure and measurement
+occurrence during days -90 through -1 before exposure. Treatment concepts and
+their descendants are excluded. Calendar-year features are omitted because
+MIMIC dates are shifted. No 90-day observation history is required, so this is a
+first-recorded-use cohort rather than a confirmed new-user cohort. The example
+is intended for implementation testing with MIMIC's limited observation history
+and synthetic SynPUF data.
+
+Hospitals use the sorted union of feature IDs with common definitions. Only
+features that are zero at every hospital are removed. The example uses binary
+features, unit scales, a fixed Laplace variance of 1 and an unpenalized intercept.
+It performs no cross-validation or outcome analysis.
+
+Output
+======
+
+Each hospital script leaves a `population` data frame in its R session, with a
+`propensityScore` column in the original row order. Model coefficients are
+stored in `attr(population, "metaData")$psModelCoef`. The population can be used
+with CohortMethod's propensity score matching functions.
+
+`aggregatePs()` invisibly returns the common named coefficient vector. The
+example site script closes its Andromeda object after fitting. When calling
+`fitPs()` directly, the caller owns the supplied `CohortMethodData` object and
+closes it when finished.
+
+Project structure
+=================
+
+```text
+FederatedPS/
+├── R/
+│   ├── FederatedPs.R          # Hospital model fitting
+│   └── Pda.R                  # Aggregation and pda exchange
+├── extras/
+│   ├── CodeToRun.R            # Hospital example
+│   ├── ConnectionDetails.R    # Site database settings
+│   └── RunAggregator.R        # Aggregator example
+├── DockerImage/Dockerfile
+├── compose.yaml
+├── start.py
+└── tests/testthat/
 ```
 
-`CodeToRun.R`는 CohortMethod의 `drug_era` 경로로 **65세 이상, 첫 기록 atorvastatin
-(1545958) 대 simvastatin (1539403)** cohort를 준비한다. 별도 cohort 테이블은 필요 없다.
-같은 날짜의 양쪽 약물 사용자는 CohortMethod 규칙에 따라 제외한다. PS에는 노출 전
-90일의 진단·약물·시술·검사 발생 및 연령군·성별을 사용하고, 비교 약물 feature와
-달력 연도는 제외한다. 관찰기간 90일을 요구하지 않으며, 신규 복용자 연구로 해석하지 않는다.
-MIMIC의 제한된 관찰 이력과 SynPUF의 합성 데이터 특성상 이 설정은 **구현 검증용**이다.
+Local settings, work folders, experiments and reference documents are excluded
+from Git.
 
-Feature ID는 두 사이트의 정렬된 합집합을 사용하고, 공통 0인 열만 제거한다.
-이 예제의 feature는 이진값이므로 scale은 1이다. Laplace variance는 1로 고정하며
-intercept는 penalize하지 않는다. CV나 outcome 분석은 수행하지 않는다.
-각 사이트의 `population`에 PS가 추가되고 Andromeda 객체는 사용 후 닫힌다.
-새 적합을 시작할 때는 `python3 start.py`로 새 run ID를 생성한다.
+Development
+===========
 
-Tests
-=====
+Experimental (version 0.0.1). Tests use synthetic data in separate R processes
+to compare two- and three-site federated fits with pooled Cyclops, including
+row and feature alignment, matching, covariate balance and convergence handling.
 
 ```sh
 R CMD build .
 R CMD check FederatedPs_0.0.1.tar.gz
 ```
 
-테스트는 synthetic 데이터로 분리 R 프로세스의 pooled 수치 일치, 행·feature 정합성,
-CohortMethod matching·balance 및 수렴 실패 보고를 검증한다. 실제 CDM 검증에는
-접속 가능한 DB와 각 사이트의 두 치료군이 필요하다.
+Building the PDF manual requires LaTeX. Use `R CMD check --no-manual` when it is
+unavailable.
+
+License
+========
+
+FederatedPs is licensed under the Apache License 2.0.
