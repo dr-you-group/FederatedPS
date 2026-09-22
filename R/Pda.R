@@ -14,6 +14,9 @@ aggregatePs <- function(config, sites, runId, timeout = 300) {
         !all(grepl("^[A-Za-z0-9]+$", c(runId, sites)))) stop("Provide distinct alphanumeric hospital identifiers")
     if (paste0(runId, "_0_total") %in% pda::pdaList(config)) stop("Use a new runId")
     round <- 0L
+    # Layout state learned from the coordinate -1 specification exchange.
+    blockSize <- NA_integer_
+    nCoefficients <- NA_integer_
     repeat {
         key <- paste0(runId, "_", round)
         roundConfig <- config
@@ -47,16 +50,36 @@ aggregatePs <- function(config, sites, runId, timeout = 300) {
             if (anyDuplicated(reference$covariateId)) stop("Hospital feature definitions differ")
             if (!any(keep)) stop("No nonzero feature remains")
             coefficientNames <- c("(Intercept)", first$specification$features[keep])
+            if (!identical(first$specification$protocol, .protocolVersion)) {
+                stop("Hospital protocol version differs from the aggregator; expected ",
+                     .protocolVersion)
+            }
+            blockSize <- .blockSizeOf(first$specification$control)
+            nCoefficients <- length(coefficientNames)
             result <- keep
         } else if (coordinate == -2L) {
             for (site in sites) if (!identical(values[[site]], first)) stop("Hospital final models differ")
             result <- first$coefficients
         } else {
-            shared <- if (coordinate == 0L) 2L else 3:4
-            summed <- if (coordinate == 0L) 1L else 1:2
+            # Packet layout.  A coordinate packet carries w coordinates as
+            #   [gradient(1..w), curvature(1..w), coefficient(1..w), bound(1..w)]
+            # so the summed range is 1:(2w) and the shared range (2w+1):(4w).
+            # At w == 1 these are 1:2 and 3:4, i.e. the original scalar layout.
+            if (coordinate == 0L) {
+                width <- 1L
+                shared <- 2L
+                summed <- 1L
+            } else {
+                width <- .packetWidth(first, coordinate, blockSize, nCoefficients)
+                shared <- (2L * width + 1L):(4L * width)
+                summed <- seq_len(2L * width)
+            }
             result <- first
             result[summed] <- 0
             for (site in sites) {
+                if (length(values[[site]]) != length(first)) {
+                    stop("Hospital packet layouts differ at coordinate ", coordinate)
+                }
                 if (any(!is.finite(values[[site]]))) stop("Non-finite hospital statistics")
                 if (any(values[[site]][shared] != first[shared])) stop("Hospital coefficient or prior states differ")
                 result[summed] <- result[summed] + values[[site]][summed]
@@ -66,6 +89,41 @@ aggregatePs <- function(config, sites, runId, timeout = 300) {
         if (coordinate == -2L) return(invisible(stats::setNames(result, coefficientNames)))
         round <- round + 1L
     }
+}
+
+# Protocol identifier.  Hospitals and the aggregator must agree exactly; a
+# mismatch means one side is running a different packet layout.
+.protocolVersion <- "fedps/2-block"
+
+.blockSizeOf <- function(control) {
+    size <- control$blockSize
+    if (is.null(size)) size <- 1L
+    size <- as.integer(size)
+    if (length(size) != 1L || is.na(size) || size < 1L) stop("Invalid common block size")
+    size
+}
+
+# Expected number of coordinates in the packet announced by `coordinate`, given
+# the agreed block size and coordinate count.  This pins down both the layout
+# and the block ordering, so a scalar packet sent while the run is in block mode
+# is rejected rather than silently summed as if it were a block of one.
+.packetWidth <- function(statistics, coordinate, blockSize, nCoefficients) {
+    if (is.na(blockSize) || is.na(nCoefficients)) {
+        stop("Coordinate statistics arrived before the specification exchange")
+    }
+    if (coordinate < 1L || coordinate > nCoefficients) {
+        stop("Coordinate ", coordinate, " is outside the agreed model")
+    }
+    if ((coordinate - 1L) %% blockSize != 0L) {
+        stop("Coordinate ", coordinate, " does not start a block of ", blockSize)
+    }
+    expected <- min(blockSize, nCoefficients - coordinate + 1L)
+    if (length(statistics) != 4L * expected) {
+        stop("Expected a ", expected, "-coordinate packet (", 4L * expected,
+             " values) at coordinate ", coordinate, " but received ",
+             length(statistics))
+    }
+    expected
 }
 
 .putPs <- function(value, name, config) {

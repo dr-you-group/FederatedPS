@@ -86,7 +86,8 @@ fitPs <- function(cohortMethodData, population = NULL, covariateIds = NULL,
     reference <- merge(reference, analysis[c("analysisId", "analysisName", "domainId",
                                              "isBinary", "missingMeansZero")], by = "analysisId")
 
-    keep <- exchange(-1L, list(specification = list(features = features,
+    keep <- exchange(-1L, list(specification = list(protocol = .protocolVersion,
+        features = features,
         scales = unname(scales), priorVariance = priorVariance, control = unclass(control),
         startingCoefficients = unname(startingCoefficients),
         cohorts = attr(cohortMethodData, "metaData")[c("targetId", "comparatorId")],
