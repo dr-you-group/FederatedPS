@@ -28,3 +28,6 @@
 ^presentations$
 ^.*\.(pdf|pptx|docx)$
 ^extras/sql$
+^extras/realworlds?$
+^extras/study_selection$
+^figure_reference$

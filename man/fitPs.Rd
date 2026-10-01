@@ -54,4 +54,5 @@ encoding. Scaling is supplied, not estimated separately at each hospital.
 Only globally zero columns are removed. No sampling or cross-validation
 is performed. The caller retains ownership of \code{cohortMethodData} and must
 close it with \code{Andromeda::close()} when finished.
+Study definitions recorded by \code{\link[=getDbStudyData]{getDbStudyData()}} must agree across hospitals.
 }

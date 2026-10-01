@@ -5,6 +5,8 @@
 !R/**
 !man/
 !man/**
+!inst/
+!inst/**
 !DockerImage/
 !DockerImage/Dockerfile
 !extras/

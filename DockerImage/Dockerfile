@@ -18,6 +18,7 @@ RUN Rscript -e 'DatabaseConnector::downloadJdbcDrivers("postgresql", pathToDrive
 COPY NAMESPACE /opt/FederatedPs/NAMESPACE
 COPY R /opt/FederatedPs/R
 COPY man /opt/FederatedPs/man
+COPY inst /opt/FederatedPs/inst
 RUN R CMD INSTALL /opt/FederatedPs
 RUN cp -r /opt/FederatedPs /home/rstudio/FederatedPs && chown -R rstudio:rstudio /home/rstudio/FederatedPs
 COPY --chown=rstudio:rstudio extras /home/rstudio/FederatedPs/extras

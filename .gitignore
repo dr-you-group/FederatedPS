@@ -16,6 +16,10 @@
 /archive/
 /jdbc/
 /extras/sql/CohortFeasibility.sql
+/extras/realworld/
+/extras/realworlds/
+/extras/study_selection/
+/figure_reference/
 
 # Editor and agent state
 AGENTS.md

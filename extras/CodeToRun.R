@@ -3,27 +3,13 @@ library(FederatedPs)
 source("extras/ConnectionDetails.R")
 config <- pda::getCloudConfig(site_id = site)
 
-# This is a first-recorded-use methods cohort, not a confirmed new-user study.
-# Calendar-year features are omitted because MIMIC dates are shifted.
-covariateSettings <- FeatureExtraction::createCovariateSettings(
-    useDemographicsGender = TRUE, useDemographicsAgeGroup = TRUE,
-    useConditionOccurrenceLongTerm = TRUE, useDrugExposureLongTerm = TRUE,
-    useProcedureOccurrenceLongTerm = TRUE, useMeasurementLongTerm = TRUE,
-    longTermStartDays = -90, endDays = -1,
-    excludedCovariateConceptIds = c(1545958, 1539403), addDescendantsToExclude = TRUE
-)
-dataArgs <- CohortMethod::createGetDbCohortMethodDataArgs(
-    covariateSettings = covariateSettings, firstExposureOnly = TRUE,
-    washoutPeriod = 0, minAge = 65, restrictToCommonPeriod = FALSE,
-    removeDuplicateSubjects = "keep first, truncate to second"
-)
+# Set these identically at every hospital, or use start.py's CLI options.
+study <- Sys.getenv("FEDERATEDPS_STUDY", "opioid")
+scenario <- Sys.getenv("FEDERATEDPS_SCENARIO", "default")
 population <- local({
-    cohortMethodData <- CohortMethod::getDbCohortMethodData(
+    cohortMethodData <- getDbStudyData(
         connectionDetails = connectionDetails, cdmDatabaseSchema = cdmDatabaseSchema,
-        # CohortMethod requires an outcome ID; -1 matches no OMOP concept.
-        targetId = 1545958, comparatorId = 1539403,
-        outcomeIds = -1, outcomeTable = "condition_era",
-        exposureTable = "drug_era", getDbCohortMethodDataArgs = dataArgs
+        study = study, scenario = scenario
     )
     on.exit(Andromeda::close(cohortMethodData))
     population <- CohortMethod::createStudyPopulation(cohortMethodData,

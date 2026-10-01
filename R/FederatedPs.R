@@ -20,6 +20,7 @@
 #'   Only globally zero columns are removed. No sampling or cross-validation
 #'   is performed. The caller retains ownership of `cohortMethodData` and must
 #'   close it with `Andromeda::close()` when finished.
+#'   Study definitions recorded by [getDbStudyData()] must agree across hospitals.
 #' @importClassesFrom CohortMethod CohortMethodData
 #' @importFrom rlang .data
 #' @export
@@ -88,7 +89,8 @@ fitPs <- function(cohortMethodData, population = NULL, covariateIds = NULL,
     keep <- exchange(-1L, list(specification = list(features = features,
         scales = unname(scales), priorVariance = priorVariance, control = unclass(control),
         startingCoefficients = unname(startingCoefficients),
-        cohorts = attr(cohortMethodData, "metaData")[c("targetId", "comparatorId")]),
+        cohorts = attr(cohortMethodData, "metaData")[c("targetId", "comparatorId")],
+        study = attr(cohortMethodData, "metaData")$studyDefinition),
         reference = reference,
         present = as.vector(Matrix::colSums(x != 0) > 0)))
     x <- x[, keep, drop = FALSE]
@@ -110,5 +112,6 @@ fitPs <- function(cohortMethodData, population = NULL, covariateIds = NULL,
     attr(population, "metaData")$psModelCoef <- coefficients
     attr(population, "metaData")$psModelPriorVariance <- priorVariance
     attr(population, "metaData")$psError <- "OK"
+    attr(population, "metaData")$studyDefinition <- attr(cohortMethodData, "metaData")$studyDefinition
     population
 }

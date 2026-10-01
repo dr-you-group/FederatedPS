@@ -38,7 +38,7 @@ aggregatePs <- function(config, sites, runId, timeout = 300) {
             keep <- first$present
             for (site in sites) {
                 if (!identical(values[[site]]$specification, first$specification)) {
-                    stop("Hospital features, scales or fitting settings differ")
+                    stop("Hospital features, scales or fitting settings differ (including study definitions)")
                 }
                 references[[site]] <- values[[site]]$reference
                 keep <- keep | values[[site]]$present

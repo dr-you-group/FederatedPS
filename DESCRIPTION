@@ -11,17 +11,18 @@ License: Apache License (== 2.0)
 Encoding: UTF-8
 Depends: R (>= 4.1.0)
 Imports:
+    Andromeda,
     CohortMethod (>= 6.0.3),
     Cyclops (>= 3.7.1),
+    DatabaseConnector,
     dplyr,
+    FeatureExtraction,
     Matrix,
     pda (>= 1.3.0),
     rlang,
+    SqlRender,
     stats
 Suggests:
-    Andromeda,
-    DatabaseConnector,
-    FeatureExtraction,
     parallel,
     testthat (>= 3.0.0)
 Config/testthat/edition: 3
