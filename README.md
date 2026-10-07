@@ -7,6 +7,139 @@ model using Cyclops coordinate descent and pda. Feature metadata
 and coordinate statistics are shared; patient rows and propensity scores remain
 at each hospital.
 
+<!-- BEGIN PUBLIC STUDY CATALOG -->
+## Public OMOP and Phenotype Library tasks (dev)
+
+The `dev` extension retains 13 legacy presets and adds **18 public-source comparison tasks**.
+The primary simulation uses **MIMIC-IV / SynPUF-A / SynPUF-B**.
+These are adapted PS benchmarks, not replications of the publications’ effect estimates.
+A registry entry is a candidate; successful cohort generation alone does not establish clinical validity.
+See the [preparation and ATLAS workflow](docs/study-workflow.md), [registry](inst/studies/registry.json)
+and [pinned source manifest](inst/studies/source/manifest.json). No PS fitting or matching is launched by the preparation scripts.
+
+### Study questions, references and selection reasons
+
+| Study ID | Target / comparator | Source journal · year · DOI | Original study question / benchmark reason |
+|---|---|---|---|
+| `ohdsi_htn_acei_arb` | ACE inhibitors / ARBs | The Lancet · 2019 · [10.1016/S0140-6736(19)32317-7](https://doi.org/10.1016/S0140-6736(19)32317-7) | Comparative effectiveness and safety of first-line antihypertensive therapies. Common indication with differences in initial drug-class choice. |
+| `ohdsi_htn_acei_dccb` | ACE inhibitors / dihydropyridine CCBs | The Lancet · 2019 · [10.1016/S0140-6736(19)32317-7](https://doi.org/10.1016/S0140-6736(19)32317-7) | Comparative effectiveness and safety of first-line antihypertensive therapies. Common indication with differences in initial drug-class choice. |
+| `ohdsi_htn_acei_thiazide` | ACE inhibitors / thiazide / thiazide-like diuretics | The Lancet · 2019 · [10.1016/S0140-6736(19)32317-7](https://doi.org/10.1016/S0140-6736(19)32317-7) | Comparative effectiveness and safety of first-line antihypertensive therapies. Common indication with differences in initial drug-class choice. |
+| `ohdsi_htn_arb_dccb` | ARBs / dihydropyridine CCBs | The Lancet · 2019 · [10.1016/S0140-6736(19)32317-7](https://doi.org/10.1016/S0140-6736(19)32317-7) | Comparative effectiveness and safety of first-line antihypertensive therapies. Common indication with differences in initial drug-class choice. |
+| `ohdsi_htn_arb_thiazide` | ARBs / thiazide / thiazide-like diuretics | The Lancet · 2019 · [10.1016/S0140-6736(19)32317-7](https://doi.org/10.1016/S0140-6736(19)32317-7) | Comparative effectiveness and safety of first-line antihypertensive therapies. Common indication with differences in initial drug-class choice. |
+| `ohdsi_htn_dccb_thiazide` | dihydropyridine CCBs / thiazide / thiazide-like diuretics | The Lancet · 2019 · [10.1016/S0140-6736(19)32317-7](https://doi.org/10.1016/S0140-6736(19)32317-7) | Comparative effectiveness and safety of first-line antihypertensive therapies. Common indication with differences in initial drug-class choice. |
+| `ohdsi_htn_chlorthalidone_hctz` | chlorthalidone / hydrochlorothiazide | JAMA Internal Medicine · 2020 · [10.1001/jamainternmed.2019.7454](https://doi.org/10.1001/jamainternmed.2019.7454) | Cardiovascular and safety outcomes of first-line chlorthalidone versus hydrochlorothiazide. Within-class ingredient choice complements the class-level comparisons. |
+| `ohdsi_depression_sertraline_citalopram` | sertraline / citalopram | Philosophical Transactions of the Royal Society A · 2018 · [10.1098/rsta.2017.0356](https://doi.org/10.1098/rsta.2017.0356) | Large-scale comparative effectiveness of depression treatments across observational databases. Psychiatric indication; SSRI and SSRI/SNRI treatment-choice tasks. |
+| `ohdsi_depression_sertraline_escitalopram` | sertraline / escitalopram | Philosophical Transactions of the Royal Society A · 2018 · [10.1098/rsta.2017.0356](https://doi.org/10.1098/rsta.2017.0356) | Large-scale comparative effectiveness of depression treatments across observational databases. Psychiatric indication; SSRI and SSRI/SNRI treatment-choice tasks. |
+| `ohdsi_depression_sertraline_fluoxetine` | sertraline / fluoxetine | Philosophical Transactions of the Royal Society A · 2018 · [10.1098/rsta.2017.0356](https://doi.org/10.1098/rsta.2017.0356) | Large-scale comparative effectiveness of depression treatments across observational databases. Psychiatric indication; SSRI and SSRI/SNRI treatment-choice tasks. |
+| `ohdsi_depression_sertraline_venlafaxine` | sertraline / venlafaxine | Philosophical Transactions of the Royal Society A · 2018 · [10.1098/rsta.2017.0356](https://doi.org/10.1098/rsta.2017.0356) | Large-scale comparative effectiveness of depression treatments across observational databases. Psychiatric indication; SSRI and SSRI/SNRI treatment-choice tasks. |
+| `ohdsi_depression_sertraline_duloxetine` | sertraline / duloxetine | Philosophical Transactions of the Royal Society A · 2018 · [10.1098/rsta.2017.0356](https://doi.org/10.1098/rsta.2017.0356) | Large-scale comparative effectiveness of depression treatments across observational databases. Psychiatric indication; SSRI and SSRI/SNRI treatment-choice tasks. |
+| `ohdsi_levetiracetam_phenytoin` | levetiracetam / phenytoin | Epilepsia · 2017 · [10.1111/epi.13828](https://doi.org/10.1111/epi.13828) | Angioedema risk among new users of levetiracetam compared with phenytoin. Antiseizure treatment choice and a 183-day observation requirement. |
+| `ohdsi_alendronate_raloxifene` | alendronate / raloxifene | Scientific Reports · 2020 · [10.1038/s41598-020-68037-8](https://doi.org/10.1038/s41598-020-68037-8) | Fracture effectiveness and safety of alendronate compared with raloxifene in women with osteoporosis. Sex-, age- and indication-restricted treatment choice. |
+| `pl_uti_fluoroquinolone_cephalosporin` | fluoroquinolone / cephalosporin | OHDSI Phenotype Library 1060/1061; no comparative-paper DOI/journal/year assigned | Antibiotic-class choice in patients with urinary tract infection. Acute infection indication using a pair of public treatment phenotypes; not a published comparative-effect replication. |
+| `pl_uti_fluoroquinolone_trimethoprim` | fluoroquinolone / trimethoprim | OHDSI Phenotype Library 1060/1062; no comparative-paper DOI/journal/year assigned | Antibiotic-class choice in patients with urinary tract infection. Acute infection indication using a pair of public treatment phenotypes; not a published comparative-effect replication. |
+| `pl_uti_cephalosporin_trimethoprim` | cephalosporin / trimethoprim | OHDSI Phenotype Library 1061/1062; no comparative-paper DOI/journal/year assigned | Antibiotic-class choice in patients with urinary tract infection. Acute infection indication using a pair of public treatment phenotypes; not a published comparative-effect replication. |
+| `pl_pneumonia_fluoroquinolone_cephalosporin` | fluoroquinolone / cephalosporin | OHDSI Phenotype Library 1063/1064; no comparative-paper DOI/journal/year assigned | Antibiotic-class choice in patients with acute typical pneumonia. Acute infection indication using a pair of public treatment phenotypes; not a published comparative-effect replication. |
+
+These are 18 treatment comparisons from several source studies, not 18 independent publications.
+The default scenario uses adults ≥18, first recorded drug era and −90…−1-day covariates.
+Study-specific windows and source modifications are recorded in the registry and executable ATLAS JSON.
+The osteoporosis design retains the original female and >45-year restrictions.
+All virtual-site analyses additionally require index on/after the first 365-day baseline landmark.
+The selected antibiotic phenotypes have pending library peer review and require formulation review.
+UTI strict definitions are blocked on the current vocabulary because excluded MedDRA seeds 36102152 and 36102938 are missing.
+Other invalid/deprecated seeds are retained transparently for review in the concept audit; a familiar drug name alone does not validate the resolved cohort.
+
+### Cohort preparation counts
+
+Values are **Target / Comparator persons before matching**, after pair selection, site landmark and native OP.
+V1 = `default`; V2 = `studySpecific`. `pending` means no completed count is available; it is not zero.
+`blocked` identifies a failed vocabulary prerequisite. These counts come from cohort-generation diagnostics,
+not from a completed local/pooled/federated analysis. The [aggregate snapshot](docs/study-feasibility.csv)
+also records feature counts and prematch SMD summaries; local `output/studies/cohort_counts.csv` retains all attrition stages.
+
+Snapshot refreshed (UTC): 2026-10-07 08:47.
+
+| Study | V1 MIMIC-IV | V1 SynPUF-A | V1 SynPUF-B | V2 MIMIC-IV | V2 SynPUF-A | V2 SynPUF-B |
+|---|---:|---:|---:|---:|---:|---:|
+| `ohdsi_htn_acei_arb` | 42,399 / 15,547 | 145,534 / 143,533 | 147,102 / 145,825 | 1,172 / 407 | 2,971 / 1,021 | 2,231 / 786 |
+| `ohdsi_htn_acei_dccb` | 33,559 / 26,615 | 141,693 / 170,679 | 143,163 / 175,309 | 1,172 / 1,039 | 2,971 / 1,278 | 2,231 / 991 |
+| `ohdsi_htn_acei_thiazide` | 35,993 / 14,501 | 135,087 / 136,975 | 136,297 / 141,865 | 1,172 / 476 | 2,971 / 1,250 | 2,231 / 947 |
+| `ohdsi_htn_arb_dccb` | 12,751 / 31,870 | 135,467 / 167,983 | 137,717 / 172,583 | 407 / 1,039 | 1,021 / 1,278 | 786 / 991 |
+| `ohdsi_htn_arb_thiazide` | 13,956 / 19,115 | 133,910 / 140,972 | 135,431 / 146,090 | 407 / 476 | 1,021 / 1,250 | 786 / 947 |
+| `ohdsi_htn_dccb_thiazide` | 30,759 / 16,880 | 171,235 / 143,926 | 175,245 / 148,994 | 1,039 / 476 | 1,278 / 1,250 | 991 / 947 |
+| `ohdsi_htn_chlorthalidone_hctz` | 1,929 / 18,064 | 101,167 / 163,362 | 103,257 / 169,474 | 86 / 388 | 241 / 780 | 167 / 606 |
+| `ohdsi_depression_sertraline_citalopram` | 10,472 / 11,368 | 86,097 / 80,401 | 85,012 / 79,969 | 1,204 / 719 | 3,802 / 3,478 | 3,010 / 2,796 |
+| `ohdsi_depression_sertraline_escitalopram` | 10,765 / 4,626 | 92,427 / 17,169 | 91,330 / 16,430 | 1,236 / 617 | 4,397 / 757 | 3,463 / 632 |
+| `ohdsi_depression_sertraline_fluoxetine` | 10,718 / 6,998 | 84,827 / 92,673 | 83,941 / 90,602 | 1,230 / 562 | 3,627 / 3,953 | 2,891 / 3,250 |
+| `ohdsi_depression_sertraline_venlafaxine` | 10,772 / 4,451 | 86,450 / 79,277 | 85,252 / 78,387 | 1,245 / 485 | 3,832 / 3,381 | 3,037 / 2,773 |
+| `ohdsi_depression_sertraline_duloxetine` | 10,730 / 5,211 | 91,457 / 27,016 | 90,231 / 26,232 | 1,229 / 719 | 4,325 / 1,141 | 3,417 / 925 |
+| `ohdsi_levetiracetam_phenytoin` | 11,901 / 3,063 | 32,359 / 25,652 | 32,084 / 24,569 | 1,124 / 261 | 4,618 / 4,473 | 3,591 / 3,598 |
+| `ohdsi_alendronate_raloxifene` | 2,085 / 251 | 53,615 / 11,914 | 52,638 / 11,796 | 325 / 15 | 4,292 / 852 | 3,450 / 737 |
+| `pl_uti_fluoroquinolone_cephalosporin` | 29,359 / 66,934 | 131,624 / 169,444 | 131,630 / 164,726 | blocked | blocked | blocked |
+| `pl_uti_fluoroquinolone_trimethoprim` | 40,451 / 10,009 | 141,210 / 79,849 | 140,738 / 80,033 | blocked | blocked | blocked |
+| `pl_uti_cephalosporin_trimethoprim` | 74,135 / 8,050 | 177,914 / 78,633 | 172,740 / 78,771 | blocked | blocked | blocked |
+| `pl_pneumonia_fluoroquinolone_cephalosporin` | 29,359 / 66,934 | 131,624 / 169,444 | 131,630 / 164,726 | 235 / 516 | 651 / 1,125 | 458 / 825 |
+
+Source-level patients can appear in several studies; do not add counts across rows.
+The UTI and pneumonia fluoroquinolone/cephalosporin tasks share the same default exposure definition;
+their indication-specific scenario differs. The identical default rows are not independent PS tasks.
+
+### Observed feature overlap before fitting
+
+Each cell is **three-site intersection / union of nonzero covariateIds (Jaccard %)**.
+The same feature definition and window are required for an ID to count as shared.
+These counts do not measure PS overlap, common support or matching retention; those require fitted scores.
+See the [domain and site-pair breakdown](docs/study-feature-overlap.csv). A small intersection alone is not
+a rejection threshold, and a large intersection does not establish clinical comparability.
+In particular, zero measurement capture in a claims source is a recording difference, not an absence of disease.
+
+| Study | V1 shared / union (Jaccard) | V2 shared / union (Jaccard) |
+|---|---:|---:|
+| `ohdsi_htn_acei_arb` | 5,113 / 41,245 (12.4%) | 1,779 / 28,117 (6.3%) |
+| `ohdsi_htn_acei_dccb` | 5,258 / 41,669 (12.6%) | 2,026 / 29,851 (6.8%) |
+| `ohdsi_htn_acei_thiazide` | 5,107 / 41,002 (12.5%) | 1,834 / 28,715 (6.4%) |
+| `ohdsi_htn_arb_dccb` | 4,902 / 41,289 (11.9%) | 1,508 / 25,225 (6.0%) |
+| `ohdsi_htn_arb_thiazide` | 4,666 / 40,255 (11.6%) | 1,249 / 23,745 (5.3%) |
+| `ohdsi_htn_dccb_thiazide` | 5,127 / 41,406 (12.4%) | 1,580 / 25,956 (6.1%) |
+| `ohdsi_htn_chlorthalidone_hctz` | 4,105 / 38,952 (10.5%) | 761 / 18,396 (4.1%) |
+| `ohdsi_depression_sertraline_citalopram` | 4,347 / 39,274 (11.1%) | 3,313 / 49,140 (6.7%) |
+| `ohdsi_depression_sertraline_escitalopram` | 3,851 / 37,952 (10.1%) | 3,194 / 46,185 (6.9%) |
+| `ohdsi_depression_sertraline_fluoxetine` | 3,975 / 38,917 (10.2%) | 3,260 / 49,377 (6.6%) |
+| `ohdsi_depression_sertraline_venlafaxine` | 3,913 / 38,597 (10.1%) | 3,286 / 49,092 (6.7%) |
+| `ohdsi_depression_sertraline_duloxetine` | 3,958 / 38,189 (10.4%) | 3,375 / 46,979 (7.2%) |
+| `ohdsi_levetiracetam_phenytoin` | 3,753 / 36,154 (10.4%) | 3,099 / 49,302 (6.3%) |
+| `ohdsi_alendronate_raloxifene` | 2,716 / 34,020 (8.0%) | 2,285 / 43,030 (5.3%) |
+| `pl_uti_fluoroquinolone_cephalosporin` | 6,118 / 43,867 (13.9%) | blocked |
+| `pl_uti_fluoroquinolone_trimethoprim` | 5,820 / 43,219 (13.5%) | blocked |
+| `pl_uti_cephalosporin_trimethoprim` | 6,053 / 43,801 (13.8%) | blocked |
+| `pl_pneumonia_fluoroquinolone_cephalosporin` | 6,118 / 43,867 (13.9%) | 2,189 / 33,552 (6.5%) |
+
+Individual covariate prevalences and prematch absolute SMDs remain in local `output/studies/<site>/<study>/<scenario>/covariates.csv`.
+No local-only / pooled / federated result or postmatch metric is included in this preparation snapshot.
+
+### Recorded site and ATLAS preparation
+
+SynPUF partition eligibility: **2,024,335 persons**; seed 20261007.
+The recorded partition preparation took 527 seconds on this environment.
+These are site populations, not per-study N. The two virtual sites share one synthetic data source.
+
+| Partition | Site | Persons | Mean age | Mean Charlson | Mean baseline visits |
+|---|---|---:|---:|---:|---:|
+| caseMix | SynPUF-A | 1,011,871 | 73.47 | 4.88 | 25.69 |
+| caseMix | SynPUF-B | 1,012,464 | 71.05 | 3.63 | 19.68 |
+| random | SynPUF-A | 1,011,936 | 72.25 | 4.25 | 22.67 |
+| random | SynPUF-B | 1,012,399 | 72.27 | 4.25 | 22.70 |
+
+Duplicate persons: 0; invalid assignments: 0.
+
+Local ATLAS: 72 cohort definitions; 6 entries flag an unresolved concept-set review.
+
+Local-only, pooled and federated fitting times remain unmeasured.
+Open `http://localhost:18081/atlas/` and search cohort names beginning with `FPS /`.
+The legacy feasibility counts below describe the earlier MIMIC/SynPUF/EHRSHOT setup and are not these new virtual-site results.
+
+<!-- END PUBLIC STUDY CATALOG -->
+
 Requirements
 ============
 
@@ -135,8 +268,8 @@ sets these for the selected hospitals. All hospitals must use the same package
 version and study definition. The existing specification exchange also checks
 the study and scenario before optimization.
 
-Available presets
------------------
+Legacy presets
+--------------
 
 The twelve selected comparisons and the original statin reference are below.
 Days are **prior continuous observation / class drug-free washout / indication
@@ -214,8 +347,8 @@ The following differences determine how these references should be interpreted:
   design choices. Dose, severity, external use and treatment intent can remain
   unmeasured, and related presets may contain the same patients.
 
-Two cohort scenarios
---------------------
+Two legacy cohort scenarios
+---------------------------
 
 - **Version 1 (`default`)**: age **18 or older**, first recorded `drug_era` for either arm,
   all forms and record types, no indication restriction, no prior-observation

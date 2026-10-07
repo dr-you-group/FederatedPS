@@ -25,7 +25,7 @@ def read_marker(site, study, scenario, phase):
 def write_snapshot(name, rows):
     if not rows: return
     with (root/'docs'/name).open('w',newline='') as stream:
-        writer=csv.DictWriter(stream,fieldnames=list(rows[0]))
+        writer=csv.DictWriter(stream,fieldnames=list(rows[0]),lineterminator='\n')
         writer.writeheader();writer.writerows(rows)
 
 snapshot=[]
@@ -46,6 +46,7 @@ for s in registry:
                 cohortStatus=cohort.get('status','pending'),featureStatus=feature.get('status','pending'),
                 targetPersons=count.get('targetPersons',''),comparatorPersons=count.get('comparatorPersons',''),
                 **{k:metrics.get(k,'') for k in ['features','nonzero','maxAbsoluteSmd','meanAbsoluteSmd','abovePointOne']},
+                fractionAbovePointOne=(int(metrics['abovePointOne'])/int(metrics['features']) if metrics and int(metrics['features']) else ''),
                 definitionHash=cohort.get('definitionHash',''),error=feature.get('error',cohort.get('error',''))))
 write_snapshot('study-feasibility.csv',snapshot)
 write_snapshot('study-feature-overlap.csv',overlap)
@@ -91,7 +92,9 @@ for s in registry:
             blocked=cohort.get('status')=='failed'
             cells.append('blocked' if blocked else (f"{int(r['targetPersons']):,} / {int(r['comparatorPersons']):,}" if r else 'pending'))
     lines.append('| `'+s['study']+'` | '+' | '.join(cells)+' |')
-lines += ['', 'Source-level patients can appear in several studies; do not add counts across rows.','',
+lines += ['', 'Source-level patients can appear in several studies; do not add counts across rows.',
+    'The UTI and pneumonia fluoroquinolone/cephalosporin tasks share the same default exposure definition;',
+    'their indication-specific scenario differs. The identical default rows are not independent PS tasks.','',
     '### Observed feature overlap before fitting','',
     'Each cell is **three-site intersection / union of nonzero covariateIds (Jaccard %)**.',
     'The same feature definition and window are required for an ID to count as shared.',
@@ -109,11 +112,27 @@ for s in registry:
         cells.append(f"{int(r['sharedFeatures']):,} / {int(r['unionFeatures']):,} ({float(r['jaccard'])*100:.1f}%)" if r else ('blocked' if blocked else 'pending'))
     lines.append('| `'+s['study']+'` | '+' | '.join(cells)+' |')
 lines += ['', 'Individual covariate prevalences and prematch absolute SMDs remain in local `output/studies/<site>/<study>/<scenario>/covariates.csv`.',
-    'No local-only / pooled / federated result or postmatch metric is included in this preparation snapshot.',
-    'SynPUF partition eligibility is 2,024,335 persons: SynPUF-A 1,011,871; SynPUF-B 1,012,464',
-    '(local preparation on 2026-10-07, seed 20261007). These are site populations, not per-study N.',
-    'Partitioning took 527 seconds on this environment; local-only, pooled and federated fitting times remain unmeasured.',
-    'The local ATLAS instance contains 72 cohort definitions (18 tasks × 2 scenarios × 2 arms); six strict UTI cohort entries flag an unresolved indication concept set.',
+    'No local-only / pooled / federated result or postmatch metric is included in this preparation snapshot.','',
+    '### Recorded site and ATLAS preparation','']
+if (out/'partition.json').exists():
+    partition=json.loads((out/'partition.json').read_text())
+    eligible=sum(s['persons'] for s in partition['sites'])
+    lines += [f"SynPUF partition eligibility: **{eligible:,} persons**; seed {partition['specification']['seed']}.",
+        f"The recorded partition preparation took {partition['seconds']:.0f} seconds on this environment.",
+        'These are site populations, not per-study N. The two virtual sites share one synthetic data source.']
+if (out/'partition_diagnostics.csv').exists():
+    lines += ['', '| Partition | Site | Persons | Mean age | Mean Charlson | Mean baseline visits |',
+        '|---|---|---:|---:|---:|---:|']
+    for r in csv.DictReader((out/'partition_diagnostics.csv').open()):
+        label={'synpufA':'SynPUF-A','synpufB':'SynPUF-B'}[r['site']]
+        lines.append(f"| {r['mode']} | {label} | {int(r['persons']):,} | {float(r['meanAge']):.2f} | {float(r['meanCharlson']):.2f} | {float(r['meanVisits']):.2f} |")
+if (out/'partition_integrity.csv').exists():
+    r=next(csv.DictReader((out/'partition_integrity.csv').open()))
+    lines += ['', f"Duplicate persons: {r['duplicatePersons']}; invalid assignments: {r['invalidAssignments']}."]
+if (out/'atlas_ids.csv').exists():
+    atlas=list(csv.DictReader((out/'atlas_ids.csv').open()))
+    lines += ['', f"Local ATLAS: {len(atlas)} cohort definitions; {sum(bool(r['conceptReview']) for r in atlas)} entries flag an unresolved concept-set review."]
+lines += ['', 'Local-only, pooled and federated fitting times remain unmeasured.',
     'Open `http://localhost:18081/atlas/` and search cohort names beginning with `FPS /`.',
     'The legacy feasibility counts below describe the earlier MIMIC/SynPUF/EHRSHOT setup and are not these new virtual-site results.','',end]
 readme=root/'README.md'

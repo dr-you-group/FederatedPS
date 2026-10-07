@@ -206,6 +206,9 @@ coverage, timing, vocabulary and formulation capture. Neither a fixed total N
 nor a single Jaccard threshold guarantees an adequate PS task. Related studies
 can share patients and are not independent replications. Study selection must
 be fixed before inspecting local versus federated results.
+The UTI and pneumonia fluoroquinolone/cephalosporin defaults deliberately share
+the same exposure-only population; only their indication-specific scenarios
+define different questions. Do not count those default runs as independent tasks.
 
 Later local-only / pooled / federated models must use identical eligible
 populations, covariate definitions and within-site matching settings. Planned

@@ -1,0 +1,5 @@
+# Preserve pinned upstream bytes and their SHA-256 hashes, including CRLF and
+# upstream whitespace. Applied definitions and package code use normal checks.
+inst/studies/source/Legend/** -text -whitespace
+inst/studies/source/StudyProtocols/** -text -whitespace
+inst/studies/source/PhenotypeLibrary/** -text -whitespace
