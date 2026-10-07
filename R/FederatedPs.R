@@ -90,7 +90,8 @@ fitPs <- function(cohortMethodData, population = NULL, covariateIds = NULL,
         scales = unname(scales), priorVariance = priorVariance, control = unclass(control),
         startingCoefficients = unname(startingCoefficients),
         cohorts = attr(cohortMethodData, "metaData")[c("targetId", "comparatorId")],
-        study = attr(cohortMethodData, "metaData")$studyDefinition),
+        study = attr(cohortMethodData, "metaData")$studyDefinition,
+        resolvedConceptHash = attr(cohortMethodData, "metaData")$resolvedConceptHash),
         reference = reference,
         present = as.vector(Matrix::colSums(x != 0) > 0)))
     x <- x[, keep, drop = FALSE]

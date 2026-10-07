@@ -44,6 +44,7 @@ services:
 
   synpuf:
     image: federatedps-rstudio:local
+    profiles: [synpuf]
     ports:
       - "127.0.0.1:38789:8787"
     environment:
@@ -87,6 +88,56 @@ services:
     networks:
       - ehrshot
 
+  synpufa:
+    image: federatedps-rstudio:local
+    profiles: [virtual]
+    ports:
+      - "127.0.0.1:38791:8787"
+    environment:
+      PASSWORD: ${SYNPUFA_RSTUDIO_PASSWORD:-${SYNPUF_RSTUDIO_PASSWORD}}
+      USERID: ${RSTUDIO_UID:-1000}
+      GROUPID: ${RSTUDIO_GID:-1000}
+      FEDERATEDPS_SITE: synpufA
+      FEDERATEDPS_PARTITION: ${FEDERATEDPS_PARTITION:-case}
+      FEDERATEDPS_PARTITION_SCHEMA: ${FEDERATEDPS_PARTITION_SCHEMA:-fps_sim}
+      FEDERATEDPS_RUN: ${FEDERATEDPS_RUN:?Use python start.py}
+      FEDERATEDPS_STUDY: ${FEDERATEDPS_STUDY:-ohdsi_htn_acei_arb}
+      FEDERATEDPS_SCENARIO: ${FEDERATEDPS_SCENARIO:-default}
+      PDA_DIR: /exchange
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./.Renviron.synpuf:/home/rstudio/FederatedPs/.Renviron.synpuf:ro
+      - ./work/synpufA:/home/rstudio/FederatedPs/work
+      - exchange:/exchange
+    networks:
+      - synpufa
+
+  synpufb:
+    image: federatedps-rstudio:local
+    profiles: [virtual]
+    ports:
+      - "127.0.0.1:38792:8787"
+    environment:
+      PASSWORD: ${SYNPUFB_RSTUDIO_PASSWORD:-${SYNPUF_RSTUDIO_PASSWORD}}
+      USERID: ${RSTUDIO_UID:-1000}
+      GROUPID: ${RSTUDIO_GID:-1000}
+      FEDERATEDPS_SITE: synpufB
+      FEDERATEDPS_PARTITION: ${FEDERATEDPS_PARTITION:-case}
+      FEDERATEDPS_PARTITION_SCHEMA: ${FEDERATEDPS_PARTITION_SCHEMA:-fps_sim}
+      FEDERATEDPS_RUN: ${FEDERATEDPS_RUN:?Use python start.py}
+      FEDERATEDPS_STUDY: ${FEDERATEDPS_STUDY:-ohdsi_htn_acei_arb}
+      FEDERATEDPS_SCENARIO: ${FEDERATEDPS_SCENARIO:-default}
+      PDA_DIR: /exchange
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./.Renviron.synpuf:/home/rstudio/FederatedPs/.Renviron.synpuf:ro
+      - ./work/synpufB:/home/rstudio/FederatedPs/work
+      - exchange:/exchange
+    networks:
+      - synpufb
+
 volumes:
   exchange: {}
 
@@ -95,3 +146,5 @@ networks:
   mimic: {}
   synpuf: {}
   ehrshot: {}
+  synpufa: {}
+  synpufb: {}

@@ -20,6 +20,8 @@
 /extras/realworlds/
 /extras/study_selection/
 /figure_reference/
+/atlas/local/
+/atlas/backups/
 
 # Editor and agent state
 AGENTS.md

@@ -1,0 +1,29 @@
+Package: LargeScalePopEst
+Title: Large-Scale Population-Level Evidence Generation
+Version: 0.1.1
+Author: Martijn J. Schuemie [aut, cre],
+    Patrick B. Ryan [aut]
+Maintainer: Martijn J. Schuemie <schuemie@ohdsi.org>
+Description: This study aims to generate population-level evidence on treatments used for major depressive disorder.
+Depends:
+    R (>= 3.1),
+    DatabaseConnector
+Imports:
+    Cyclops,
+    DBI,
+    ff,
+    ffbase,
+    RJDBC,
+	SqlRender,
+    FeatureExtraction,
+    CohortMethod (>= 2.1.1),
+    EmpiricalCalibration,
+	MethodEvaluation,
+    OhdsiSharing
+Suggests:
+    testthat,
+    meta,
+    ggplot2
+License: Apache License 2.0
+LazyData: true
+RoxygenNote: 6.0.1

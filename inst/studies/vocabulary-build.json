@@ -1,0 +1,10 @@
+{
+  "vocabularyVersions": {
+    "ATC": "ATC 2024-12-29",
+    "None": "v5.0 27-AUG-25",
+    "RxNorm": "RxNorm 20250602",
+    "RxNorm Extension": "RxNorm Extension 2025-08-12",
+    "SNOMED": "2025-02-01 SNOMED CT International Edition; 2025-03-01 SNOMED CT US Edition; 2025-04-09 SNOMED CT UK Edition"
+  },
+  "patientDataRead": false
+}

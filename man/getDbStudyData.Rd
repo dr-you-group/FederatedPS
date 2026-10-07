@@ -8,7 +8,10 @@ getDbStudyData(
   connectionDetails,
   cdmDatabaseSchema,
   study = "opioid",
-  scenario = c("default", "studySpecific")
+  scenario = c("default", "studySpecific"),
+  cohortDatabaseSchema = NULL,
+  cohortTable = "fps_cohort",
+  generateCohorts = TRUE
 )
 }
 \arguments{
@@ -21,11 +24,20 @@ vocabulary tables, for example \code{mimiciv}, \code{synpuf} or \code{ehrshot}.}
 \item{study}{Name from \code{\link[=listStudies]{listStudies()}}.}
 
 \item{scenario}{Design from \code{\link[=getStudySettings]{getStudySettings()}}.}
+
+\item{cohortDatabaseSchema}{Writable analysis schema for public-study cohorts.
+Required for public studies; ignored by legacy presets.}
+
+\item{cohortTable}{Public-study cohort table prefix.}
+
+\item{generateCohorts}{Generate public cohorts first; FALSE reuses cohorts
+generated with the same definition by \code{\link[=generateStudyCohorts]{generateStudyCohorts()}}.}
 }
 \value{
 Hospital-local \link[CohortMethod:CohortMethodData]{CohortMethod::CohortMethodData} for \code{\link[=fitPs]{fitPs()}}.
-Its \code{metaData} attribute contains \code{studyDefinition}, \code{resolvedIngredients}
-and the final cohort counts in \code{attrition}. No outcomes are extracted.
+Its \code{metaData} contains \code{studyDefinition}, resolved ingredients (legacy) or
+resolved concept sets/hashes (public), and cohort counts in \code{attrition}.
+No outcomes are extracted.
 The caller must close the object with \code{Andromeda::close()}.
 }
 \description{
@@ -36,8 +48,9 @@ Uses a dedicated connection and session-local tables/views; source
 CDM tables are not changed. CohortMethod's installed cohort SQL retains its
 native observation-period join. FeatureExtraction supplies age group, sex
 and binary condition, drug, procedure and measurement occurrence features.
-Study-specific clinical features use a patient-specific upper date bound
-before the linked acute episode without moving the exposure index.
+Legacy study-specific features end before the linked acute episode.
+Public-study features use the registry's pre-index-day windows. Public
+cohort tables are generated in the separate supplied analysis schema.
 
 A missing vocabulary definition, overlapping observation periods yielding
 duplicate patients, or an empty treatment arm raises an error before

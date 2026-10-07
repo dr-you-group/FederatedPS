@@ -7,9 +7,9 @@
 listStudies()
 }
 \value{
-A data frame with study names, target and comparator labels and an
-indicator for the twelve selected benchmark comparisons. \code{statin} retains
-the original example's drug pair as an additional reference.
+A data frame with study names, arm labels, source type, group,
+definition version and status. \code{selected} retains the legacy selection
+flag; new public candidates require diagnostics before primary selection.
 }
 \description{
 List available study presets

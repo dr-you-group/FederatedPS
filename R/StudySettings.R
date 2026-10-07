@@ -9,13 +9,28 @@
 #' @details Both scenarios require age 18 or older and a native observation
 #'   period containing index. `default` uses the first recorded drug era,
 #'   covariates on days -90 through -1, and no prior-observation or drug-free
-#'   requirement. `studySpecific` uses the first eligible drug exposure and
-#'   restricts clinical covariates and indications to before the linked acute
-#'   episode as well as before index. The windows are benchmark design choices,
-#'   not replications of the cited clinical studies. See the README for details.
+#'   requirement. Legacy `studySpecific` presets restrict features to before
+#'   the linked acute episode. Public-study eligibility is defined by bundled
+#'   Circe JSON and features end on day -1. Study-specific age/sex restrictions
+#'   can be stricter. These are adapted benchmarks; see the README for changes
+#'   from each source, native-OP requirements and the SynPUF site landmark.
 #' @export
 getStudySettings <- function(study = "opioid", scenario = c("default", "studySpecific")) {
     scenario <- match.arg(scenario)
+    public <- .publicStudyDefinitions()
+    if (length(study) == 1L && !is.na(study) && study %in% names(public)) {
+        settings <- public[[study]]
+        settings$scenario <- scenario
+        settings$minAge <- 18L
+        settings$shortTermStartDays <- if (scenario == "default") NULL else -30L
+        if (scenario == "default") {
+            settings$priorObservationDays <- 0L
+            settings$longTermStartDays <- -90L
+        }
+        settings$endDays <- -1L
+        settings$definitionHash <- .studyJsonHash(study, scenario)
+        return(settings)
+    }
     studies <- .studyDefinitions()
     if (length(study) != 1L || is.na(study) || !study %in% names(studies)) {
         stop("Unknown study; use listStudies() for available names")
@@ -43,16 +58,28 @@ getStudySettings <- function(study = "opioid", scenario = c("default", "studySpe
 
 #' List available study presets
 #'
-#' @return A data frame with study names, target and comparator labels and an
-#'   indicator for the twelve selected benchmark comparisons. `statin` retains
-#'   the original example's drug pair as an additional reference.
+#' @return A data frame with study names, arm labels, source type, group,
+#'   definition version and status. `selected` retains the legacy selection
+#'   flag; new public candidates require diagnostics before primary selection.
 #' @export
 listStudies <- function() {
     studies <- .studyDefinitions()
-    data.frame(study = names(studies),
+    legacy <- data.frame(study = names(studies),
                target = vapply(studies, `[[`, character(1), "target"),
                comparator = vapply(studies, `[[`, character(1), "comparator"),
-               selected = names(studies) != "statin", row.names = NULL)
+               selected = names(studies) != "statin", sourceType = "legacyPreset",
+               group = "legacy", definitionVersion = 1L, status = "legacy_benchmark",
+               row.names = NULL)
+    public <- .publicStudyDefinitions()
+    if (!length(public)) return(legacy)
+    added <- data.frame(study = names(public),
+        target = vapply(public, `[[`, character(1), "target"),
+        comparator = vapply(public, `[[`, character(1), "comparator"), selected = FALSE,
+        sourceType = vapply(public, `[[`, character(1), "sourceType"),
+        group = vapply(public, `[[`, character(1), "group"),
+        definitionVersion = vapply(public, function(x) as.integer(x$definitionVersion), integer(1)),
+        status = vapply(public, `[[`, character(1), "status"), row.names = NULL)
+    rbind(legacy, added)
 }
 
 .studyDefinitions <- function() {

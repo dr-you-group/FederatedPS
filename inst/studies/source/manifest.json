@@ -1,0 +1,194 @@
+[
+  {
+    "repository": "OHDSI/Legend",
+    "commit": "4e7867fc3fc9ce902f2fb5274252484d7f38060b",
+    "path": "DESCRIPTION",
+    "file": "source/Legend/DESCRIPTION",
+    "url": "https://raw.githubusercontent.com/OHDSI/Legend/4e7867fc3fc9ce902f2fb5274252484d7f38060b/DESCRIPTION",
+    "sha256": "8b5f6a073ab3ed570e3d6417167fac14b135e0d2952b33d17dc077cd6eb03e4b"
+  },
+  {
+    "repository": "OHDSI/Legend",
+    "commit": "4e7867fc3fc9ce902f2fb5274252484d7f38060b",
+    "path": "inst/settings/ExposuresOfInterest.csv",
+    "file": "source/Legend/inst/settings/ExposuresOfInterest.csv",
+    "url": "https://raw.githubusercontent.com/OHDSI/Legend/4e7867fc3fc9ce902f2fb5274252484d7f38060b/inst/settings/ExposuresOfInterest.csv",
+    "sha256": "bc3dfa7352a82fee8847f62fc06f831a764cb6b641137233d114a79079dae0e2"
+  },
+  {
+    "repository": "OHDSI/Legend",
+    "commit": "4e7867fc3fc9ce902f2fb5274252484d7f38060b",
+    "path": "inst/sql/sql_server/CreateExposureCohortsHypertension.sql",
+    "file": "source/Legend/inst/sql/sql_server/CreateExposureCohortsHypertension.sql",
+    "url": "https://raw.githubusercontent.com/OHDSI/Legend/4e7867fc3fc9ce902f2fb5274252484d7f38060b/inst/sql/sql_server/CreateExposureCohortsHypertension.sql",
+    "sha256": "e71fa4c35bc24d4639e36bc72419e270a71aab460b7f62a41bb1e3fe722011e5"
+  },
+  {
+    "repository": "OHDSI/Legend",
+    "commit": "4e7867fc3fc9ce902f2fb5274252484d7f38060b",
+    "path": "inst/sql/sql_server/CreateCohortPairs.sql",
+    "file": "source/Legend/inst/sql/sql_server/CreateCohortPairs.sql",
+    "url": "https://raw.githubusercontent.com/OHDSI/Legend/4e7867fc3fc9ce902f2fb5274252484d7f38060b/inst/sql/sql_server/CreateCohortPairs.sql",
+    "sha256": "c5623085bd0a0f60b0522c04b89c64d5eae67b900e3132a317fdad0a0160368f"
+  },
+  {
+    "repository": "OHDSI/Legend",
+    "commit": "4e7867fc3fc9ce902f2fb5274252484d7f38060b",
+    "path": "R/CreateExposureCohorts.R",
+    "file": "source/Legend/R/CreateExposureCohorts.R",
+    "url": "https://raw.githubusercontent.com/OHDSI/Legend/4e7867fc3fc9ce902f2fb5274252484d7f38060b/R/CreateExposureCohorts.R",
+    "sha256": "846cdf7e33450f933c9f821972c27cf4be9b6e44a0b0e0f0e08915adbc17b412"
+  },
+  {
+    "repository": "OHDSI/StudyProtocols",
+    "commit": "8de0454c6be4c120ba97d7376907d651327573a4",
+    "path": "LargeScalePopEst/DESCRIPTION",
+    "file": "source/StudyProtocols/LargeScalePopEst/DESCRIPTION",
+    "url": "https://raw.githubusercontent.com/OHDSI/StudyProtocols/8de0454c6be4c120ba97d7376907d651327573a4/LargeScalePopEst/DESCRIPTION",
+    "sha256": "c6983dd47bc430884a0716964dce0511528bda2e922284dd0950f9a3ac0e63aa"
+  },
+  {
+    "repository": "OHDSI/StudyProtocols",
+    "commit": "8de0454c6be4c120ba97d7376907d651327573a4",
+    "path": "LargeScalePopEst/inst/settings/ExposuresOfInterest.csv",
+    "file": "source/StudyProtocols/LargeScalePopEst/inst/settings/ExposuresOfInterest.csv",
+    "url": "https://raw.githubusercontent.com/OHDSI/StudyProtocols/8de0454c6be4c120ba97d7376907d651327573a4/LargeScalePopEst/inst/settings/ExposuresOfInterest.csv",
+    "sha256": "8f2174468c2d640d8e34d2593ead34ebddbaff3d28a5ab822dc186cd457d2e8a"
+  },
+  {
+    "repository": "OHDSI/StudyProtocols",
+    "commit": "8de0454c6be4c120ba97d7376907d651327573a4",
+    "path": "LargeScalePopEst/inst/sql/sql_server/ExposureCohorts.sql",
+    "file": "source/StudyProtocols/LargeScalePopEst/inst/sql/sql_server/ExposureCohorts.sql",
+    "url": "https://raw.githubusercontent.com/OHDSI/StudyProtocols/8de0454c6be4c120ba97d7376907d651327573a4/LargeScalePopEst/inst/sql/sql_server/ExposureCohorts.sql",
+    "sha256": "68ec4c7c790a71132c6e71b56860baa9560b3c1a2220bf04260dfd774c9cf5e9"
+  },
+  {
+    "repository": "OHDSI/StudyProtocols",
+    "commit": "8de0454c6be4c120ba97d7376907d651327573a4",
+    "path": "LargeScalePopEst/inst/sql/sql_server/CreateCohortPairs.sql",
+    "file": "source/StudyProtocols/LargeScalePopEst/inst/sql/sql_server/CreateCohortPairs.sql",
+    "url": "https://raw.githubusercontent.com/OHDSI/StudyProtocols/8de0454c6be4c120ba97d7376907d651327573a4/LargeScalePopEst/inst/sql/sql_server/CreateCohortPairs.sql",
+    "sha256": "b53e321fd79fae78406768727dd0597d903b2a8ed6fe2a34b4ddc66029eeedd4"
+  },
+  {
+    "repository": "OHDSI/StudyProtocols",
+    "commit": "8de0454c6be4c120ba97d7376907d651327573a4",
+    "path": "KeppraAngioedema/DESCRIPTION",
+    "file": "source/StudyProtocols/KeppraAngioedema/DESCRIPTION",
+    "url": "https://raw.githubusercontent.com/OHDSI/StudyProtocols/8de0454c6be4c120ba97d7376907d651327573a4/KeppraAngioedema/DESCRIPTION",
+    "sha256": "eed2f509f0a367f4c35a45ab03d32a4b008491ee06fed09bb18618f6dfe20200"
+  },
+  {
+    "repository": "OHDSI/StudyProtocols",
+    "commit": "8de0454c6be4c120ba97d7376907d651327573a4",
+    "path": "KeppraAngioedema/inst/circe/Treatment.json",
+    "file": "source/StudyProtocols/KeppraAngioedema/inst/circe/Treatment.json",
+    "url": "https://raw.githubusercontent.com/OHDSI/StudyProtocols/8de0454c6be4c120ba97d7376907d651327573a4/KeppraAngioedema/inst/circe/Treatment.json",
+    "sha256": "ed300bad29686029b044caedd74f55d585c93dbf1b15bc2b0d983e88978a8f26"
+  },
+  {
+    "repository": "OHDSI/StudyProtocols",
+    "commit": "8de0454c6be4c120ba97d7376907d651327573a4",
+    "path": "KeppraAngioedema/inst/circe/Comparator.json",
+    "file": "source/StudyProtocols/KeppraAngioedema/inst/circe/Comparator.json",
+    "url": "https://raw.githubusercontent.com/OHDSI/StudyProtocols/8de0454c6be4c120ba97d7376907d651327573a4/KeppraAngioedema/inst/circe/Comparator.json",
+    "sha256": "158c925e951003f5bbb7f611c44703ec1265d0c066b7ba9acd410237ac93b56a"
+  },
+  {
+    "repository": "OHDSI/StudyProtocols",
+    "commit": "8de0454c6be4c120ba97d7376907d651327573a4",
+    "path": "AlendronateVsRaloxifene/DESCRIPTION",
+    "file": "source/StudyProtocols/AlendronateVsRaloxifene/DESCRIPTION",
+    "url": "https://raw.githubusercontent.com/OHDSI/StudyProtocols/8de0454c6be4c120ba97d7376907d651327573a4/AlendronateVsRaloxifene/DESCRIPTION",
+    "sha256": "f65ed5aff7d47a87ed4e3c80162397f1fd577187b41842e597cdab2c64e3dccb"
+  },
+  {
+    "repository": "OHDSI/StudyProtocols",
+    "commit": "8de0454c6be4c120ba97d7376907d651327573a4",
+    "path": "AlendronateVsRaloxifene/inst/cohorts/Alendronate.json",
+    "file": "source/StudyProtocols/AlendronateVsRaloxifene/inst/cohorts/Alendronate.json",
+    "url": "https://raw.githubusercontent.com/OHDSI/StudyProtocols/8de0454c6be4c120ba97d7376907d651327573a4/AlendronateVsRaloxifene/inst/cohorts/Alendronate.json",
+    "sha256": "29e321722ca44a6f933068221cba6f64f808f054b90fccc8eb3d076203fbb9ce"
+  },
+  {
+    "repository": "OHDSI/StudyProtocols",
+    "commit": "8de0454c6be4c120ba97d7376907d651327573a4",
+    "path": "AlendronateVsRaloxifene/inst/cohorts/Raloxifene.json",
+    "file": "source/StudyProtocols/AlendronateVsRaloxifene/inst/cohorts/Raloxifene.json",
+    "url": "https://raw.githubusercontent.com/OHDSI/StudyProtocols/8de0454c6be4c120ba97d7376907d651327573a4/AlendronateVsRaloxifene/inst/cohorts/Raloxifene.json",
+    "sha256": "c942e9d3f6669d1f4a3acc8f07f292f022a27a51bed3d8a14b7e03a0c7fb6566"
+  },
+  {
+    "repository": "OHDSI/PhenotypeLibrary",
+    "commit": "40106e4e2892d883c208b9df10ad56711da3e21d",
+    "path": "DESCRIPTION",
+    "file": "source/PhenotypeLibrary/DESCRIPTION",
+    "url": "https://raw.githubusercontent.com/OHDSI/PhenotypeLibrary/40106e4e2892d883c208b9df10ad56711da3e21d/DESCRIPTION",
+    "sha256": "fcc797ead418980c122f0c5f1d5000e6711923feb73cada169d1dc3621f947da"
+  },
+  {
+    "repository": "OHDSI/PhenotypeLibrary",
+    "commit": "40106e4e2892d883c208b9df10ad56711da3e21d",
+    "path": "inst/Cohorts.csv",
+    "file": "source/PhenotypeLibrary/inst/Cohorts.csv",
+    "url": "https://raw.githubusercontent.com/OHDSI/PhenotypeLibrary/40106e4e2892d883c208b9df10ad56711da3e21d/inst/Cohorts.csv",
+    "sha256": "022977b7890559143a0bd0eac6bdf538e5b74f4e880e493ba65a9b43fdf7852e"
+  },
+  {
+    "repository": "OHDSI/PhenotypeLibrary",
+    "commit": "40106e4e2892d883c208b9df10ad56711da3e21d",
+    "path": "inst/cohorts/1046.json",
+    "file": "source/PhenotypeLibrary/inst/cohorts/1046.json",
+    "url": "https://raw.githubusercontent.com/OHDSI/PhenotypeLibrary/40106e4e2892d883c208b9df10ad56711da3e21d/inst/cohorts/1046.json",
+    "sha256": "865d197643778044878fb64d8694dd6c8433daae0295239e64a42bc0de1fdbdd"
+  },
+  {
+    "repository": "OHDSI/PhenotypeLibrary",
+    "commit": "40106e4e2892d883c208b9df10ad56711da3e21d",
+    "path": "inst/cohorts/1047.json",
+    "file": "source/PhenotypeLibrary/inst/cohorts/1047.json",
+    "url": "https://raw.githubusercontent.com/OHDSI/PhenotypeLibrary/40106e4e2892d883c208b9df10ad56711da3e21d/inst/cohorts/1047.json",
+    "sha256": "021dfeb6d8c4a55b658d1590b0899f84a882f7c1b68293868774d32936549b23"
+  },
+  {
+    "repository": "OHDSI/PhenotypeLibrary",
+    "commit": "40106e4e2892d883c208b9df10ad56711da3e21d",
+    "path": "inst/cohorts/1060.json",
+    "file": "source/PhenotypeLibrary/inst/cohorts/1060.json",
+    "url": "https://raw.githubusercontent.com/OHDSI/PhenotypeLibrary/40106e4e2892d883c208b9df10ad56711da3e21d/inst/cohorts/1060.json",
+    "sha256": "df7e09df6234c1749d01932ff52b729a049565ec9a94780938f8fac591f8b121"
+  },
+  {
+    "repository": "OHDSI/PhenotypeLibrary",
+    "commit": "40106e4e2892d883c208b9df10ad56711da3e21d",
+    "path": "inst/cohorts/1061.json",
+    "file": "source/PhenotypeLibrary/inst/cohorts/1061.json",
+    "url": "https://raw.githubusercontent.com/OHDSI/PhenotypeLibrary/40106e4e2892d883c208b9df10ad56711da3e21d/inst/cohorts/1061.json",
+    "sha256": "8545b1ed355531937e108a5e8bc45b73ad674420b973654a7e93442c84bf77bd"
+  },
+  {
+    "repository": "OHDSI/PhenotypeLibrary",
+    "commit": "40106e4e2892d883c208b9df10ad56711da3e21d",
+    "path": "inst/cohorts/1062.json",
+    "file": "source/PhenotypeLibrary/inst/cohorts/1062.json",
+    "url": "https://raw.githubusercontent.com/OHDSI/PhenotypeLibrary/40106e4e2892d883c208b9df10ad56711da3e21d/inst/cohorts/1062.json",
+    "sha256": "63cd0815ec378945c5a502bda2a3dccbec694fc230904b9d0864f129a25b408c"
+  },
+  {
+    "repository": "OHDSI/PhenotypeLibrary",
+    "commit": "40106e4e2892d883c208b9df10ad56711da3e21d",
+    "path": "inst/cohorts/1063.json",
+    "file": "source/PhenotypeLibrary/inst/cohorts/1063.json",
+    "url": "https://raw.githubusercontent.com/OHDSI/PhenotypeLibrary/40106e4e2892d883c208b9df10ad56711da3e21d/inst/cohorts/1063.json",
+    "sha256": "9a63ae5d030675f23784796a46a5880a5bb7383bb589c0c38f20ce7073737fe5"
+  },
+  {
+    "repository": "OHDSI/PhenotypeLibrary",
+    "commit": "40106e4e2892d883c208b9df10ad56711da3e21d",
+    "path": "inst/cohorts/1064.json",
+    "file": "source/PhenotypeLibrary/inst/cohorts/1064.json",
+    "url": "https://raw.githubusercontent.com/OHDSI/PhenotypeLibrary/40106e4e2892d883c208b9df10ad56711da3e21d/inst/cohorts/1064.json",
+    "sha256": "680861b2cfb5880b313c380a5a74665ec46d5a02b31bd0ff66957c28f3ac5e19"
+  }
+]

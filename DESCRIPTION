@@ -1,6 +1,6 @@
 Package: FederatedPs
 Title: Plaintext Federated Propensity Scores with Cyclops
-Version: 0.0.1
+Version: 0.0.2
 Authors@R: person("Younwoo", "Ki", email = "dewonsunrise@gmail.com",
     role = c("aut", "cre"))
 Description: Fits a plaintext federated propensity score model with the
@@ -15,14 +15,20 @@ Imports:
     CohortMethod (>= 6.0.3),
     Cyclops (>= 3.7.1),
     DatabaseConnector,
+    digest,
     dplyr,
     FeatureExtraction,
+    jsonlite,
     Matrix,
     pda (>= 1.3.0),
     rlang,
     SqlRender,
     stats
 Suggests:
+    RJSONIO,
+    CirceR (>= 1.3.3),
+    CohortGenerator (>= 1.1.1),
+    ROhdsiWebApi (>= 1.3.3),
     parallel,
     testthat (>= 3.0.0)
 Config/testthat/edition: 3

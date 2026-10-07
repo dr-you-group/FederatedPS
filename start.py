@@ -11,16 +11,18 @@ parser.add_argument("run_id", nargs="?", default=uuid4().hex)
 parser.add_argument("--study", default=os.environ.get("FEDERATEDPS_STUDY", "opioid"))
 parser.add_argument("--scenario", choices=["default", "studySpecific"],
                     default=os.environ.get("FEDERATEDPS_SCENARIO", "default"))
-parser.add_argument("--ehrshot", action="store_true", help="Include EHRSHOT as the third hospital")
+group = parser.add_mutually_exclusive_group()
+group.add_argument("--ehrshot", action="store_true", help="Include EHRSHOT as the third hospital")
+group.add_argument("--virtual-sites", action="store_true", help="Use MIMIC-IV, SynPUF-A and SynPUF-B after PrepareSites.py")
 args = parser.parse_args()
 project = Path(__file__).resolve().parent
-sites = ["mimic", "synpuf"] + (["ehrshot"] if args.ehrshot else [])
+sites = ["mimic", "synpufA", "synpufB"] if args.virtual_sites else ["mimic", "synpuf"] + (["ehrshot"] if args.ehrshot else [])
 for site in ["aggregator"] + sites:
     (project / "work" / site).mkdir(parents=True, exist_ok=True, mode=0o700)
 environment = dict(os.environ, FEDERATEDPS_RUN=args.run_id,
                    FEDERATEDPS_STUDY=args.study, FEDERATEDPS_SCENARIO=args.scenario,
                    FEDERATEDPS_SITES=",".join(sites),
-                   COMPOSE_PROFILES="ehrshot" if args.ehrshot else "")
+                   COMPOSE_PROFILES="virtual" if args.virtual_sites else ("synpuf,ehrshot" if args.ehrshot else "synpuf"))
 subprocess.run(["docker", "compose", "-p", "federatedps-slides", "up", "--build",
                 "-d", "--remove-orphans"], cwd=project, env=environment, check=True)
 subprocess.run(["docker", "compose", "-p", "federatedps-slides", "exec", "-T",
@@ -28,6 +30,7 @@ subprocess.run(["docker", "compose", "-p", "federatedps-slides", "exec", "-T",
                 'chown "$USERID:$GROUPID" /exchange && chmod 700 /exchange'],
                cwd=project, env=environment, check=True)
 print(f"Run: {args.run_id}; study: {args.study}; scenario: {args.scenario}")
-for site, port in [("aggregator", 38787), ("mimic", 38788), ("synpuf", 38789), ("ehrshot", 38790)]:
+for site, port in [("aggregator", 38787), ("mimic", 38788), ("synpuf", 38789), ("ehrshot", 38790),
+                   ("synpufA", 38791), ("synpufB", 38792)]:
     if site == "aggregator" or site in sites:
         print(f"{site}: http://localhost:{port}")

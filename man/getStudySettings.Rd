@@ -24,8 +24,9 @@ Get the definition of a named study
 Both scenarios require age 18 or older and a native observation
 period containing index. \code{default} uses the first recorded drug era,
 covariates on days -90 through -1, and no prior-observation or drug-free
-requirement. \code{studySpecific} uses the first eligible drug exposure and
-restricts clinical covariates and indications to before the linked acute
-episode as well as before index. The windows are benchmark design choices,
-not replications of the cited clinical studies. See the README for details.
+requirement. Legacy \code{studySpecific} presets restrict features to before
+the linked acute episode. Public-study eligibility is defined by bundled
+Circe JSON and features end on day -1. Study-specific age/sex restrictions
+can be stricter. These are adapted benchmarks; see the README for changes
+from each source, native-OP requirements and the SynPUF site landmark.
 }

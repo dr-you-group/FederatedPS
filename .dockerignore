@@ -11,5 +11,10 @@
 !DockerImage/Dockerfile
 !extras/
 !extras/*.R
+!extras/studies/
+!extras/studies/*.R
+!extras/studies/*.py
+!docs/
+!docs/**
 !FederatedPs.Rproj
 !README.md

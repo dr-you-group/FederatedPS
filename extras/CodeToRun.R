@@ -9,7 +9,8 @@ scenario <- Sys.getenv("FEDERATEDPS_SCENARIO", "default")
 population <- local({
     cohortMethodData <- getDbStudyData(
         connectionDetails = connectionDetails, cdmDatabaseSchema = cdmDatabaseSchema,
-        study = study, scenario = scenario
+        study = study, scenario = scenario, cohortDatabaseSchema = cohortDatabaseSchema,
+        generateCohorts = FALSE # Run extras/studies/PrepareStudies.R cohorts first for public studies.
     )
     on.exit(Andromeda::close(cohortMethodData))
     population <- CohortMethod::createStudyPopulation(cohortMethodData,

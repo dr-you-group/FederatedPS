@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY DESCRIPTION /opt/FederatedPs/DESCRIPTION
 RUN Rscript -e 'install.packages(c("remotes", "testthat", "roxygen2"), Ncpus=2); remotes::install_github(read.dcf("/opt/FederatedPs/DESCRIPTION")[1, "Remotes"], upgrade="never"); remotes::install_deps("/opt/FederatedPs", dependencies=NA, upgrade="never")'
 ENV DATABASECONNECTOR_JAR_FOLDER=/opt/federatedps-drivers
+RUN Rscript -e 'install.packages(c("CirceR", "CohortGenerator"), repos=c("https://ohdsi.r-universe.dev", "https://cloud.r-project.org")); remotes::install_github("OHDSI/ROhdsiWebApi@44e549a92f7c4d51b7e090d2ac4b5032ed974ce0", upgrade="never")'
 RUN Rscript -e 'DatabaseConnector::downloadJdbcDrivers("postgresql", pathToDriver=Sys.getenv("DATABASECONNECTOR_JAR_FOLDER"))'
 COPY NAMESPACE /opt/FederatedPs/NAMESPACE
 COPY R /opt/FederatedPs/R
@@ -22,5 +23,6 @@ COPY inst /opt/FederatedPs/inst
 RUN R CMD INSTALL /opt/FederatedPs
 RUN cp -r /opt/FederatedPs /home/rstudio/FederatedPs && chown -R rstudio:rstudio /home/rstudio/FederatedPs
 COPY --chown=rstudio:rstudio extras /home/rstudio/FederatedPs/extras
+COPY --chown=rstudio:rstudio docs /home/rstudio/FederatedPs/docs
 COPY --chown=rstudio:rstudio FederatedPs.Rproj README.md /home/rstudio/FederatedPs/
 WORKDIR /home/rstudio/FederatedPs
