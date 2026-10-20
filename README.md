@@ -23,6 +23,27 @@ Requirements
 The Docker image provides R 4.6.1, Java, the PostgreSQL JDBC driver and the
 required R packages.
 
+Proximal block CCD
+==================
+
+This branch adds a block variant of the coordinate descent. Each exchange carries the
+statistics of `blockSize` coordinates and the update is a damped proximal step (`alpha`), which
+cuts the number of communication rounds. The algorithm is in the Cyclops fork pinned in
+`DESCRIPTION` (`taseong/Cyclops@snu_proximal_ccd`); the package side is the block packet
+layout (protocol `fedps/2-block`) and `fitPsDesign()`.
+
+```r
+remotes::install_github("taseong/FederatedPS@snu_proximal_ccd")   # installs the pinned Cyclops too
+```
+
+```r
+control <- Cyclops::createControl(convergenceType = "lange", blockSize = 50, alpha = 0.5)
+```
+
+Every hospital uses the same `blockSize` and `alpha`; `blockSize = 1, alpha = 1` is the original
+algorithm. Experiment code and how to run it are in
+[`experiments/README.md`](experiments/README.md).
+
 Installation
 ============
 
