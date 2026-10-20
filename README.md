@@ -33,8 +33,12 @@ cuts the number of communication rounds. The algorithm is in the Cyclops fork pi
 layout (protocol `fedps/2-block`) and `fitPsDesign()`.
 
 ```r
-remotes::install_github("taseong/FederatedPS@snu_proximal_ccd")   # installs the pinned Cyclops too
+remotes::install_github("taseong/Cyclops@snu_proximal_ccd")
+remotes::install_github("taseong/FederatedPS@snu_proximal_ccd")
 ```
+
+Install Cyclops first: an existing Cyclops 3.7.1 counts as up to date, so the pin in
+`DESCRIPTION` alone does not replace it.
 
 ```r
 control <- Cyclops::createControl(convergenceType = "lange", blockSize = 50, alpha = 0.5)

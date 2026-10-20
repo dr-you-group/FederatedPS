@@ -35,14 +35,16 @@ The block CCD needs that Cyclops build: other builds do not accept `blockSize` i
 
 ## Setup
 
-Install the package; this also installs the pinned Cyclops:
+Install the Cyclops fork, then the package:
 
 ```r
-remotes::install_github("taseong/FederatedPS@snu_proximal_ccd")
+remotes::install_github("taseong/Cyclops@snu_proximal_ccd")
+remotes::install_github("taseong/FederatedPS@snu_proximal_ccd")   # or remotes::install_local(".")
 ```
 
-(or `remotes::install_local(".")` from a checkout; the Docker image in `DockerImage/` does the
-same through `DESCRIPTION`). Then, from the repository root:
+An existing Cyclops 3.7.1 counts as up to date, so the pin in `DESCRIPTION` alone does not
+replace it. The Docker image in `DockerImage/` installs the pinned Cyclops directly. Then, from
+the repository root:
 
 ```sh
 export FP_DATA=$PWD/data            # inputs: design/, statin/, synpuf_state.csv
