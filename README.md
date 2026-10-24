@@ -10,10 +10,15 @@ at each hospital.
 Requirements
 ============
 
+For native Windows Server execution using the prepared offline R bundle, see
+[`windows/README_KO.md`](windows/README_KO.md). It includes offline installation,
+a no-database smoke test, concurrent Rscript roles, and RStudio Desktop setup.
+Docker and Python are not required for that workflow.
+
 - R 4.1.0 or newer. Package dependencies are declared in `DESCRIPTION`, including
-  the required [Cyclops fork](https://github.com/dr-you-group/Cyclops) pinned to
+  the required [Cyclops fork](https://github.com/taseong/Cyclops) pinned to
   a specific commit.
-- Docker with Docker Compose and Python 3 for the included Web RStudio setup.
+- Docker with Docker Compose and Python 3 only for the included Web RStudio setup.
 - PostgreSQL OMOP CDM datasets, with read access to their clinical and vocabulary
   tables and permission to create session temporary tables. The study helpers
   use the layout produced by [CDM-loader](https://github.com/dr-you-group/CDM-loader):
@@ -33,8 +38,8 @@ cuts the number of communication rounds. The algorithm is in the Cyclops fork pi
 layout (protocol `fedps/2-block`) and `fitPsDesign()`.
 
 ```r
-remotes::install_github("taseong/Cyclops@snu_proximal_ccd")
-remotes::install_github("taseong/FederatedPS@snu_proximal_ccd")
+remotes::install_github("taseong/Cyclops@a08a9a8317a8ded49db77f6ff0394ab918b02a94")
+remotes::install_github("ts06068/FederatedPS@windows-server-offline")
 ```
 
 Install Cyclops first: an existing Cyclops 3.7.1 counts as up to date, so the pin in
@@ -55,7 +60,7 @@ To install the R package:
 
 ```r
 install.packages("remotes")
-remotes::install_github("dr-you-group/FederatedPS")
+remotes::install_github("ts06068/FederatedPS@windows-server-offline")
 ```
 
 Access to a private repository requires a `GITHUB_PAT` with read permission.
@@ -434,13 +439,13 @@ from Git.
 Development
 ===========
 
-Experimental (version 0.0.1). Tests use synthetic data in separate R processes
+Experimental (version 0.0.3). Tests use synthetic data in separate R processes
 to compare two- and three-site federated fits with pooled Cyclops, including
 row and feature alignment, matching, covariate balance and convergence handling.
 
 ```sh
 R CMD build .
-R CMD check FederatedPs_0.0.1.tar.gz
+R CMD check FederatedPs_0.0.3.tar.gz
 ```
 
 Building the PDF manual requires LaTeX. Use `R CMD check --no-manual` when it is

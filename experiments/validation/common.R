@@ -4,7 +4,7 @@ suppressPackageStartupMessages(library(Matrix))
 dir.create(file.path(FP_OUT, "validation"), recursive = TRUE, showWarnings = FALSE)
 useCyclops <- function(which = c("patched","stock")) {
   which <- match.arg(which)
-  patched <- strsplit(FP_LIB, ":", fixed = TRUE)[[1]]
+  patched <- strsplit(FP_LIB, .Platform$path.sep, fixed = TRUE)[[1]]
   lp <- if (which == "patched") unique(c(patched, .libPaths())) else setdiff(.libPaths(), patched)
   .libPaths(lp)
   suppressPackageStartupMessages(library(Cyclops))

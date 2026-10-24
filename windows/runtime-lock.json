@@ -1,0 +1,9 @@
+{
+  "rVersion": "4.6.1",
+  "rtools": "45",
+  "cyclopsRepository": "taseong/Cyclops",
+  "cyclopsCommit": "a08a9a8317a8ded49db77f6ff0394ab918b02a94",
+  "cyclopsArchive": "Cyclops-a08a9a8317a8ded49db77f6ff0394ab918b02a94.zip",
+  "cyclopsSha256": "6f327cc265fea611fd2d2a38415088fffcc4c7a93ac2430baa77e25b6b0c5ed4",
+  "protocol": "fedps/2-block"
+}

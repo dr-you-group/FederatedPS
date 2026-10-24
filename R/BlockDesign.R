@@ -18,6 +18,13 @@ fitPsDesign <- function(x, treatment, rowIds, covariateIds = NULL, config, runId
                         priorVariance = 1,
                         control = Cyclops::createControl(convergenceType = "lange"),
                         startingCoefficients = NULL, timeout = 300) {
+    if (length(dim(x)) != 2L || nrow(x) != length(rowIds) ||
+        nrow(x) != length(treatment) || nrow(x) == 0L || ncol(x) == 0L) {
+        stop("x, treatment and rowIds must describe the same nonempty rows")
+    }
+    if (is.null(colnames(x)) || anyNA(colnames(x)) || anyDuplicated(colnames(x))) {
+        stop("x must have unique, non-missing feature identifiers")
+    }
     if (!"aggregate" %in% names(formals(Cyclops::createControl))) {
         stop("Install the Cyclops fork pinned in DESCRIPTION")
     }
