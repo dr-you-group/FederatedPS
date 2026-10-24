@@ -20,16 +20,24 @@ pda_config <- pda::getCloudConfig(site_id = role, dir = config$exchange)
 if (role == "aggregator") {
     result <- FederatedPs::aggregatePs(pda_config, config$sites, config$runId,
                                         timeout = config$exchangeTimeout)
-} else if (config$mode == "Database") {
+} else if (config$mode %in% c("Database", "SyntheticCDM")) {
     result <- local({
         yuhs <- config$dataset == "YUHS"
         if (yuhs) fp_check_yuhs_sites(config)
-        connection <- if (yuhs) fp_read_yuhs_connection(file.path(config$configDirectory, "yuhs.Renviron")) else
-            fp_read_connection(file.path(config$configDirectory, paste0(role, ".Renviron")))
-        data <- FederatedPs::getDbStudyData(connectionDetails = connection,
-            cdmDatabaseSchema = Sys.getenv("CDM_DATABASE_SCHEMA"),
-            study = config$study, scenario = config$scenario,
-            careSiteId = if (yuhs) config$careSites[[role]] else NULL)
+        synthetic <- config$mode == "SyntheticCDM"
+        data <- if (synthetic) {
+            fp_check_synthetic_yuhs(config)
+            Sys.unsetenv(fp_connection_keys())
+            cat("TEST=true: loading invented local CDM tables; DB access is disabled in this path.\n")
+            FederatedPs::getSyntheticYuhsStudyData(config$careSites[[role]], config$study, config$scenario)
+        } else {
+            connection <- if (yuhs) fp_read_yuhs_connection(file.path(config$configDirectory, "yuhs.Renviron")) else
+                fp_read_connection(file.path(config$configDirectory, paste0(role, ".Renviron")))
+            FederatedPs::getDbStudyData(connectionDetails = connection,
+                cdmDatabaseSchema = Sys.getenv("CDM_DATABASE_SCHEMA"),
+                study = config$study, scenario = config$scenario,
+                careSiteId = if (yuhs) config$careSites[[role]] else NULL)
+        }
         on.exit(Andromeda::close(data))
         if (yuhs) {
             metadata <- attr(data, "metaData")
@@ -40,11 +48,18 @@ if (role == "aggregator") {
         population <- CohortMethod::createStudyPopulation(data,
             createStudyPopulationArgs = CohortMethod::createCreateStudyPopulationArgs(
                 removeSubjectsWithPriorOutcome = FALSE, minDaysAtRisk = 0))
+        if (synthetic) {
+            # Only invented rows are saved for the pooled numerical reference.
+            saveRDS(list(cohorts = dplyr::collect(data$cohorts),
+                         covariates = dplyr::collect(data$covariates), synthetic = TRUE),
+                    file.path(out, "synthetic-cdm-input.rds"))
+        }
         fitted <- FederatedPs::fitPs(data, population, config = pda_config, runId = config$runId,
             priorVariance = 1, control = fp_control(config), timeout = config$exchangeTimeout)
         if (yuhs) {
             fitted <- fp_attach_person_ids(fitted, dplyr::collect(data$cohorts))
             attr(fitted, "metaData")$careSiteId <- config$careSites[[role]]
+            attr(fitted, "metaData")$synthetic <- synthetic
         }
         fitted
     })

@@ -13,7 +13,7 @@ Windows의 기본 데이터 구성은 **YUHS SQL Server CDM을 세 기관으로 
 기존 번들의 `1c265564...`와 **표시 버전은 모두 3.7.1**이지만, 이전 빌드에는
 `blockSize`와 `alpha`가 없습니다. FederatedPs 소스만 바꿔서는 블록 CCD를 실행할 수 없습니다.
 
-이 설치 절차는 새 Cyclops와 FederatedPs 0.0.4을
+이 설치 절차는 새 Cyclops와 FederatedPs 0.0.5를
 `C:\FederatedPS\RLibrary\windows-block`에 설치합니다. 기존
 `C:\FederatedPS\RLibrary\4.6`은 의존성 라이브러리로 계속 사용합니다.
 이 폴더 구조는 프로젝트 소스 경로와 별개입니다. 아래 예제에서는 소스를
@@ -64,24 +64,56 @@ Cyclops C++ 소스를 Rtools45로 빌드하므로 시간이 걸립니다. `R CMD
 `Rtools45 missing`이면 기존 번들의 11번을 `-SkipRtools` 없이 완료해야 합니다.
 DLL 사용 중 오류가 나면 다른 Windows 로그인 세션의 R 작업도 종료된 상태인지 확인합니다.
 
-## 3. DB 없는 실행 검증
+## 3. HIWARE 로그인 전: test=true로 합성 YUHS CDM 실행
 
-일반 사용자 PowerShell에서 저장소 루트로 이동하여 실행합니다.
+**DB 주소에 연결할 수 없거나 HIWARE에 로그인하지 않은 상태에서도 실행할 수 있습니다.**
+설치(2단계)를 마친 뒤, 저장소 루트의 일반 사용자 PowerShell에서:
+
+```powershell
+.\windows\Run-YUHS.ps1 -Test $true
+# 기본값도 Test=true
+.\windows\Run-YUHS.ps1
+# 블록 CCD 확인
+.\windows\Run-YUHS.ps1 -Test $true -BlockSize 4 -Alpha 0.5
+```
+
+`Test=true`는 내부 `SyntheticCDM` 모드입니다. `yuhs.Renviron`을 만들거나 편집할
+필요가 없고, 기존 설정 파일이 있더라도 읽지 않습니다. DB 연결/접속 확인이나 HIWARE
+로그인을 시도하지 않습니다. 설치된 R/Java/JDBC/패키지의 로컬 로딩 검사는 그대로 합니다.
+인터넷, Python, 로컬 SQL Server, 새 의존성 설치는 필요하지 않습니다.
+
+`inst/extdata/yuhs-synthetic`의 **완전히 가상으로 만든** CARE_SITE, PERSON,
+VISIT_OCCURRENCE, OBSERVATION_PERIOD, DRUG_EXPOSURE, CONDITION_OCCURRENCE,
+PROCEDURE_OCCURRENCE, MEASUREMENT, CONCEPT, CONCEPT_ANCESTOR CSV를 읽습니다.
+세 기관 각각 120명(총 360명)의 치료군/비교군과, 제외될 다기관 방문 환자 1명이 있습니다.
+테스트용 가상 concept ID와 축약된 열을 사용하므로 완전한 OMOP CDM은 아닙니다.
+
+R에서 기관/방문 연결, 코호트와 이진 공변량을 만들고 실제 분석과 같은
+`CohortMethod::createStudyPopulation()` → `FederatedPs::fitPs()` → Cyclops/집계기 경로를
+실행합니다. `fitPsDesign()`으로 임의 행렬만 적합하는 기존 `Synthetic` 모드와 구분합니다.
+기본 CCD와 블록 CCD에서 새 RunId와 결과 폴더를 만들며, 역할별 계수 일치, PS 범위,
+360명 유지, 기관 간 환자 중복 없음, 합성 데이터를 합친 기준 CCD와 PS 최대 차이
+0.01 이하를 확인합니다. `SUCCESS.txt`에는 **TEST=true / synthetic CDM only**가 기록됩니다.
+
+샘플 테스트는 **`-Study ppi -Scenario default`, 세 기관 1/2/3**에 한정됩니다.
+`studySpecific`, 다른 연구/기관 조합은 명확한 오류로 중단합니다. 실제 연구처럼 보이는
+샘플 결과를 만들지 않도록 입력과 결과에 synthetic 표시를 넣고 실제 DB와 다른 모델
+메타데이터를 사용합니다. 세 기관의 실제 환자 분포를 재현한 자료는 아닙니다.
+
+결과: `work/windows/<RunId>/<site>/result.rds`, `synthetic-cdm-input.rds`,
+`careSite.csv`, `sitePartition.csv`, `recordLinkage.csv`, `attrition.csv`, 실행 로그.
+샘플 CSV 원본은 위 `inst/extdata`에서 볼 수 있습니다.
+**이 테스트의 PASS는 실제 DB/T-SQL/HIWARE/TLS 연결 또는 연구 타당성 검증을 뜻하지 않습니다.**
+
+기존 작은 임의 행렬 테스트와 실행기 자체 검사도 사용할 수 있습니다.
 
 ```powershell
 .\windows\tests\Test-Launcher.ps1
+.\windows\tests\Test-YUHS-Routing.ps1
 .\windows\Run-FederatedPS.ps1 -Mode Synthetic
-.\windows\Run-FederatedPS.ps1 -Mode Synthetic -BlockSize 4 -Alpha 0.5
 ```
 
-각 실행은 새로운 RunId를 자동으로 만듭니다. 합성 데이터로 집계기 1개와 사이트 3개를
-동시에 실행하고, 모든 프로세스 종료 코드, 사이트/집계기 계수 일치, PS 범위 및 합성
-데이터를 합쳐 계산한 기준 모델과의 차이(최대 절대 계수 차이 0.01 이하)를 확인합니다.
-두 명령 모두 마지막에 `PASS: all roles completed`와 `SUCCESS.txt`를 만들어야 합니다.
-`BlockSize 1 / Alpha 1`은 원래 CCD, 두 번째 명령은 블록 CCD 경로의 연동 확인입니다.
-이 작은 합성 데이터 검증은 실제 CDM 결과의 통계적 검증을 대신하지 않습니다.
-
-## 4. YUHS 세 기관 실행 (기본값)
+## 4. HIWARE 로그인 후: test=false로 실제 YUHS 실행
 
 첨부 CARE_SITE 화면에 맞춘 기본 매핑은 `windows/config/yuhs-sites.json`에 있습니다.
 `CARE_SITE_SOURCE_VALUE`의 10/20/30이 아니라 **CARE_SITE_ID의 1/2/3**을 사용합니다.
@@ -92,7 +124,8 @@ DLL 사용 중 오류가 나면 다른 Windows 로그인 세션의 R 작업도 �
 | `gangnam` | 강남세브란스병원 | 2 |
 | `yongin` | 용인세브란스병원 | 3 |
 
-세 역할은 동일한 SQL Server CDM에 각각 연결합니다. 공통 접속 설정은 한 번만 작성합니다.
+먼저 평소 절차대로 HIWARE에 로그인해 실제 DB 연결이 가능한 상태로 만드십시오.
+이 스크립트는 HIWARE 로그인을 대신하지 않습니다. 세 역할은 동일한 SQL Server CDM에 각각 연결합니다. 공통 접속 설정은 한 번만 작성합니다.
 실제 서버 주소와 계정·비밀번호는 저장소에 포함하지 않습니다.
 
 ```powershell
@@ -112,20 +145,22 @@ JDBC는 `encrypt=true;trustServerCertificate=false`로 연결합니다. 서버 �
 지원합니다. Windows 통합 인증은 별도 인증 DLL/설정이 필요하므로 이 경로에 포함하지 않습니다.
 
 ```powershell
-# DB 없이 세 역할의 실행기/블록 CCD부터 확인
-.\windows\Run-FederatedPS.ps1 -Mode Synthetic -BlockSize 4 -Alpha 0.5
+# DB 없이 합성 CDM/블록 CCD부터 확인
+.\windows\Run-YUHS.ps1 -Test $true -BlockSize 4 -Alpha 0.5
 
 # 기본: severance, gangnam, yongin / 동일 YUHS CDM
-.\windows\Run-FederatedPS.ps1 -Mode Database -Study ppi -Scenario default
+.\windows\Run-YUHS.ps1 -Test $false -Study ppi -Scenario default
 
 # 같은 사이트/연구 정의로 블록 CCD
-.\windows\Run-FederatedPS.ps1 -Mode Database -Study ppi -Scenario default `
+.\windows\Run-YUHS.ps1 -Test $false -Study ppi -Scenario default `
     -BlockSize 50 -Alpha 0.5
 
 # indication/관찰기간/washout/product 제한을 사용하는 기존 프리셋
-.\windows\Run-FederatedPS.ps1 -Mode Database -Study ppi -Scenario studySpecific `
+.\windows\Run-YUHS.ps1 -Test $false -Study ppi -Scenario studySpecific `
     -BlockSize 50 -Alpha 0.5
 ```
+
+`Test=false`에서 연결에 실패하면 오류로 중단하며 합성 데이터로 자동 전환하지 않습니다.
 
 기관 ID가 변경되면 `yuhs-sites.json`을 수정합니다. 서로 다른 양의 정수 ID여야 하며,
 실제 `CARE_SITE`에 한 행씩 있어야 합니다. 일부 기관만 실행하려면

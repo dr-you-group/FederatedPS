@@ -3,7 +3,8 @@ stopifnot(length(args) == 1L)
 config <- jsonlite::fromJSON(args[1])
 source(file.path(config$project, "windows", "common.R"))
 fp_check_names(config$runId, config$sites)
-stopifnot(config$mode %in% c("Synthetic", "Database", "Design"))
+stopifnot(config$mode %in% c("Synthetic", "SyntheticCDM", "Database", "Design"))
+if (config$mode == "SyntheticCDM") fp_check_synthetic_yuhs(config)
 invisible(fp_control(config)) # Fail before starting any process if the fork is incompatible.
 if (config$mode == "Database") {
     FederatedPs::getStudySettings(config$study, config$scenario)

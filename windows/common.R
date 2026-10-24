@@ -110,6 +110,18 @@ fp_attach_person_ids <- function(population, cohorts) {
     population
 }
 
+fp_check_synthetic_yuhs <- function(config) {
+    if (!identical(config$dataset, "YUHS") || !identical(config$study, "ppi") ||
+        !identical(config$scenario, "default") ||
+        !setequal(config$sites, c("severance", "gangnam", "yongin")) || length(config$sites) != 3L)
+        stop("Synthetic YUHS requires three default sites, Study=ppi and Scenario=default")
+    fp_check_yuhs_sites(config)
+    for (site in c("severance", "gangnam", "yongin"))
+        if (config$careSites[[site]] != match(site, c("severance", "gangnam", "yongin")))
+            stop("Synthetic YUHS requires CARE_SITE_IDs 1, 2, 3")
+    invisible(TRUE)
+}
+
 fp_control <- function(config) {
     Cyclops::createControl(convergenceType = "lange", seed = 1L, threads = 1L,
         noiseLevel = "silent", maxIterations = 5000L, tolerance = config$tolerance,

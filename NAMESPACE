@@ -3,6 +3,7 @@
 export(aggregatePs)
 export(fitPs)
 export(getDbStudyData)
+export(getSyntheticYuhsStudyData)
 export(getStudySettings)
 export(listStudies)
 importClassesFrom(CohortMethod,CohortMethodData)

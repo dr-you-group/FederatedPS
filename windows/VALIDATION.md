@@ -59,3 +59,31 @@ Confirm `careSite.csv` matches 1/2/3 and review partition/linkage/attrition CSVs
 All three sites need both treatment arms; `SUCCESS.txt` also requires disjoint
 PERSON_IDs and matching model coefficients. These runs do not establish clinical
 validity of a preset or eliminate the selection effect of excluding multisite patients.
+
+Synthetic YUHS sample update (2026-10-25):
+
+- `windows/tests/test-synthetic-yuhs.R` validates the ten packaged CSVs against
+  the deterministic generator, 120 people per site, disjoint IDs, both arms,
+  binary deduplication, bad/missing/wrong-person visit links, window filtering,
+  exclusion after an added fourth-site visit, RNG preservation and sample-only
+  parameter restrictions. It uses base R and no database.
+- `windows/tests/Test-YUHS-Routing.ps1` executes the actual launchers with
+  isolated runtime/process stubs: omitted Test and explicit Test=true choose
+  SyntheticCDM without a DB config (even with an invalid config present);
+  Test=false requires the real config and never falls back to the sample.
+- Sample preparation occurs in R, not production T-SQL. The normal population,
+  fitPs and aggregator paths are selected for SyntheticCDM. It checks pooled
+  prediction agreement rather than pooled coefficient uniqueness because age
+  and gender indicators contain redundant columns.
+- `Test-SyntheticYuhsRuntime.R` is an additional target-host integration check
+  of the installed Andromeda/CohortMethod sample and forbidden DB calls.
+  The full Windows numerical acceptance runs remain necessary:
+
+```powershell
+.\windows\Install-Offline.ps1
+.\windows\Run-RScript.ps1 -Script windows\tests\Test-SyntheticYuhsRuntime.R
+.\windows\Run-YUHS.ps1 -Test $true
+.\windows\Run-YUHS.ps1 -Test $true -BlockSize 4 -Alpha 0.5
+```
+
+No real YUHS DB, HIWARE session or credentials were used during development.

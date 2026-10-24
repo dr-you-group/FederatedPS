@@ -1,7 +1,8 @@
 #Requires -Version 5.1
 [CmdletBinding()]
 param(
-    [ValidateSet('Synthetic','Database','Design')][string]$Mode = 'Synthetic',
+    [ValidateSet('Synthetic','SyntheticCDM','Database','Design')][string]$Mode = 'Synthetic',
+    [bool]$Test = $false,
     [ValidateSet('YUHS','Example')][string]$Dataset = 'YUHS',
     [string[]]$Sites = @(),
     [string]$RunId = ([guid]::NewGuid().ToString('N')),
@@ -18,11 +19,29 @@ param(
     [string]$RHome = 'C:\Program Files\R\R-4.6.1', [string]$JavaHome = ''
 )
 . (Join-Path $PSScriptRoot 'Common.ps1')
+if ($Test) { $Mode = 'SyntheticCDM' }
+if ($Mode -eq 'SyntheticCDM' -and ($Dataset -ne 'YUHS' -or $Study -cne 'ppi' -or $Scenario -ne 'default')) {
+    throw 'The synthetic YUHS CDM smoke test requires Dataset=YUHS, Study=ppi, Scenario=default.'
+}
 $careSites = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'config\yuhs-sites.json') -Encoding UTF8 -Raw | ConvertFrom-Json
 if ($Sites.Count -eq 0) {
     $Sites = if ($Dataset -eq 'YUHS') { @($careSites.PSObject.Properties.Name) } else { @('mimic','synpuf','ehrshot') }
 }
 Assert-FederatedNames $RunId $Sites
+if ($Mode -eq 'SyntheticCDM') {
+    $expectedSites = @('severance','gangnam','yongin')
+    if ($Sites.Count -ne 3 -or @($expectedSites | Where-Object { $_ -cnotin $Sites }).Count -ne 0) {
+        throw 'The synthetic YUHS CDM smoke test runs severance, gangnam and yongin together.'
+    }
+    foreach ($site in $expectedSites) {
+        if ($careSites.$site -ne (1 + [array]::IndexOf($expectedSites, $site))) {
+            throw 'The bundled sample requires severance=1, gangnam=2, yongin=3.'
+        }
+    }
+    Write-Host 'TEST=true: invented YUHS CDM sample only; no DB settings, DB connection or HIWARE login used.' -ForegroundColor Cyan
+} elseif ($Mode -eq 'Database') {
+    Write-Host 'TEST=false: real database run. YUHS requires the authorized HIWARE session and DB settings.' -ForegroundColor Yellow
+}
 $project = Get-FederatedProject
 $runtime = Set-FederatedEnvironment -InstallRoot $InstallRoot -RHome $RHome -JavaHome $JavaHome
 if (-not $ConfigDirectory) { $ConfigDirectory = Join-Path $PSScriptRoot 'config' }
@@ -62,7 +81,7 @@ New-Item -ItemType Directory -Path $ExchangeDirectory -Force | Out-Null
 New-Item -ItemType Directory -Path $output -ErrorAction Stop | Out-Null
 New-Item -ItemType Directory -Path $exchange -ErrorAction Stop | Out-Null
 $config = [ordered]@{
-    project = $project; mode = $Mode; dataset = $Dataset; runId = $RunId; sites = @($Sites)
+    project = $project; mode = $Mode; test = ($Mode -eq 'SyntheticCDM'); dataset = $Dataset; runId = $RunId; sites = @($Sites)
     careSites = $(if ($Dataset -eq 'YUHS') { $careSites } else { $null })
     study = $Study; scenario = $Scenario; blockSize = $BlockSize; alpha = $Alpha
     tolerance = $Tolerance; exchangeTimeout = $ExchangeTimeoutSeconds
