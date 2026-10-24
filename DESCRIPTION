@@ -1,6 +1,6 @@
 Package: FederatedPs
 Title: Plaintext Federated Propensity Scores with Cyclops
-Version: 0.0.1
+Version: 0.0.2
 Authors@R: person("Younwoo", "Ki", email = "dewonsunrise@gmail.com",
     role = c("aut", "cre"))
 Description: Fits a plaintext federated propensity score model with the
@@ -12,6 +12,7 @@ Encoding: UTF-8
 Depends: R (>= 4.1.0)
 Imports:
     Andromeda,
+    methods,
     CohortMethod (>= 6.0.3),
     Cyclops (>= 3.7.1),
     DatabaseConnector,
@@ -28,4 +29,4 @@ Suggests:
 Config/testthat/edition: 3
 Roxygen: list(markdown = TRUE)
 Config/roxygen2/version: 8.1.0
-Remotes: dr-you-group/Cyclops@1c265564dadf709584203b0103e7c3c3d8388d32
+Remotes: taseong/Cyclops@a08a9a8317a8ded49db77f6ff0394ab918b02a94
