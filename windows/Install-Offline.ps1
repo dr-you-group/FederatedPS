@@ -24,6 +24,23 @@ $env:PATH = (Join-Path $RtoolsHome 'usr\bin') + ';' + $env:PATH
 $build = Join-Path (Join-Path $project 'work') ('install-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $build | Out-Null
 Add-Type -AssemblyName System.IO.Compression.FileSystem
+$driverArchive = Join-Path (Join-Path $PSScriptRoot 'payload') $lock.sqlServerArchive
+if (-not (Test-Path -LiteralPath $driverArchive)) { throw 'Missing SQL Server JDBC archive. Run the updated Prepare-Offline.ps1 online.' }
+if ((Get-FileHash -LiteralPath $driverArchive -Algorithm SHA256).Hash -ne $lock.sqlServerSha256) {
+    throw 'SQL Server JDBC archive SHA-256 mismatch.'
+}
+$driverDirectory = Join-Path $env:DATABASECONNECTOR_JAR_FOLDER 'sqlserver'
+New-Item -ItemType Directory -Path $driverDirectory -Force | Out-Null
+$driverPath = Join-Path $driverDirectory $lock.sqlServerJar
+$zip = [IO.Compression.ZipFile]::OpenRead($driverArchive)
+try {
+    $entry = $zip.GetEntry($lock.sqlServerJar)
+    if (-not $entry) { throw 'Expected JDBC JAR missing from verified archive.' }
+    [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $driverPath, $true)
+} finally { $zip.Dispose() }
+if ((Get-FileHash -LiteralPath $driverPath -Algorithm SHA256).Hash -ne $lock.sqlServerJarSha256) {
+    throw 'SQL Server JDBC JAR SHA-256 mismatch.'
+}
 [IO.Compression.ZipFile]::ExtractToDirectory($archive, $build)
 $source = Join-Path $build "Cyclops-$($lock.cyclopsCommit)"
 Invoke-FederatedR $runtime.Rscript @((Join-Path $PSScriptRoot 'install.R'), $project, $source, $runtime.Library)

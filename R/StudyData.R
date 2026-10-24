@@ -1,16 +1,27 @@
-#' Prepare a named study from a PostgreSQL OMOP CDM
+#' Prepare a named study from an OMOP CDM
 #'
 #' @param connectionDetails A [DatabaseConnector::createConnectionDetails()]
-#'   object for PostgreSQL, as used by CDM-loader.
+#'   object for PostgreSQL, or SQL Server for a care-site partition.
 #' @param cdmDatabaseSchema Unquoted CDM schema name containing clinical and
-#'   vocabulary tables, for example `mimiciv`, `synpuf` or `ehrshot`.
+#'   vocabulary tables. SQL Server also accepts `database.schema`.
 #' @param study Name from [listStudies()].
 #' @param scenario Design from [getStudySettings()].
+#' @param careSiteId SQL Server institution ID from `CARE_SITE`, linked through
+#'   `VISIT_OCCURRENCE`. Required on SQL Server; leave `NULL` on PostgreSQL.
 #' @return Hospital-local [CohortMethod::CohortMethodData] for [fitPs()].
 #'   Its `metaData` attribute contains `studyDefinition`, `resolvedIngredients`
 #'   and the final cohort counts in `attrition`. No outcomes are extracted.
 #'   The caller must close the object with `Andromeda::close()`.
-#' @details Uses a dedicated connection and session-local tables/views; source
+#' @details On SQL Server, persons with visits at multiple positive care-site
+#'   IDs are excluded. Clinical records must match the site's visit and person
+#'   IDs. Visit-linked drug exposures replace pooled drug eras. Explicit
+#'   `care-site-binary-v1` SQL extracts gender, five-year age groups and binary
+#'   condition/drug/procedure/measurement occurrences. Its feature IDs and
+#'   exposure definition must not be mixed with PostgreSQL extracts in a model.
+#'   Site linkage counts are retained in metadata; native observation periods
+#'   are not recomputed. See `windows/README_KO.md` for the full contract.
+#'
+#'   The PostgreSQL path uses a dedicated connection and session-local tables/views; source
 #'   CDM tables are not changed. CohortMethod's installed cohort SQL retains its
 #'   native observation-period join. FeatureExtraction supplies age group, sex
 #'   and binary condition, drug, procedure and measurement occurrence features.
@@ -25,17 +36,18 @@
 #'   CohortMethodData directly to [fitPs()].
 #' @export
 getDbStudyData <- function(connectionDetails, cdmDatabaseSchema, study = "opioid",
-                           scenario = c("default", "studySpecific")) {
+                           scenario = c("default", "studySpecific"), careSiteId = NULL) {
     settings <- getStudySettings(study, scenario)
-    if (length(cdmDatabaseSchema) != 1L || is.na(cdmDatabaseSchema) ||
-        !grepl("^[A-Za-z_][A-Za-z0-9_]*$", cdmDatabaseSchema) ||
-        grepl("^pg_", cdmDatabaseSchema, ignore.case = TRUE)) {
-        stop("Provide an unquoted CDM schema name, for example mimiciv")
-    }
+    .validateCdmSchema(cdmDatabaseSchema)
     connection <- DatabaseConnector::connect(connectionDetails)
     on.exit(DatabaseConnector::disconnect(connection), add = TRUE)
-    if (!identical(DatabaseConnector::dbms(connection), "postgresql")) {
-        stop("getDbStudyData supports PostgreSQL CDMs loaded by CDM-loader")
+    dbms <- DatabaseConnector::dbms(connection)
+    if (identical(dbms, "sql server")) {
+        return(.getCareSiteStudyData(connection, cdmDatabaseSchema, settings, careSiteId))
+    }
+    if (!identical(dbms, "postgresql") || !is.null(careSiteId) ||
+        grepl("[.]", cdmDatabaseSchema) || grepl("^pg_", cdmDatabaseSchema, ignore.case = TRUE)) {
+        stop("Use a PostgreSQL schema without careSiteId, or SQL Server with careSiteId")
     }
     execute <- function(file, ...) {
         sql <- paste(readLines(system.file("sql", "postgresql", file,

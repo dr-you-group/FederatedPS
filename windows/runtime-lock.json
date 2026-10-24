@@ -5,5 +5,10 @@
   "cyclopsCommit": "a08a9a8317a8ded49db77f6ff0394ab918b02a94",
   "cyclopsArchive": "Cyclops-a08a9a8317a8ded49db77f6ff0394ab918b02a94.zip",
   "cyclopsSha256": "6f327cc265fea611fd2d2a38415088fffcc4c7a93ac2430baa77e25b6b0c5ed4",
-  "protocol": "fedps/2-block"
+  "protocol": "fedps/2-block",
+  "sqlServerUrl": "https://ohdsi.github.io/DatabaseConnectorJars/sqlServerV9.2.0.zip",
+  "sqlServerArchive": "sqlServerV9.2.0.zip",
+  "sqlServerSha256": "eeee13088b81f7d9e114ee361e19cb9e9c3934d9ae41854e43d961942f46b4a0",
+  "sqlServerJar": "mssql-jdbc-9.2.0.jre8.jar",
+  "sqlServerJarSha256": "048f6ad639ed4e725033ec0809d332662de8dfa63ba662dabb583abb4db2e6a3"
 }

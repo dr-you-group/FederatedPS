@@ -7,7 +7,10 @@ stopifnot(config$mode %in% c("Synthetic", "Database", "Design"))
 invisible(fp_control(config)) # Fail before starting any process if the fork is incompatible.
 if (config$mode == "Database") {
     FederatedPs::getStudySettings(config$study, config$scenario)
-    for (site in config$sites)
+    if (config$dataset == "YUHS") {
+        fp_check_yuhs_sites(config)
+        invisible(fp_read_yuhs_connection(file.path(config$configDirectory, "yuhs.Renviron")))
+    } else for (site in config$sites)
         invisible(fp_read_connection(file.path(config$configDirectory, paste0(site, ".Renviron"))))
 }
 if (config$mode == "Design") {

@@ -3,6 +3,7 @@ fp_verify_results <- function(config) {
     if (file.exists(success_path)) unlink(success_path)
     coefficients <- readRDS(file.path(config$output, "aggregator", "result.rds"))
     stopifnot(length(coefficients) > 1L, all(is.finite(coefficients)))
+    seen_persons <- character()
     for (site in config$sites) {
         result <- readRDS(file.path(config$output, site, "result.rds"))
         if (config$mode == "Database") {
@@ -10,6 +11,13 @@ fp_verify_results <- function(config) {
             stopifnot(isTRUE(all.equal(attr(result, "metaData")$psModelCoef,
                                       coefficients, tolerance = 1e-10)))
             scores <- result$propensityScore
+            if (identical(config$dataset, "YUHS")) {
+                stopifnot(identical(as.numeric(attr(result, "metaData")$careSiteId), as.numeric(config$careSites[[site]])),
+                          "personId" %in% names(result), !anyNA(result$personId), !anyDuplicated(result$personId))
+                ids <- as.character(result$personId)
+                if (any(ids %in% seen_persons)) stop("Patient overlap across YUHS institutions; SUCCESS was not written")
+                seen_persons <- c(seen_persons, ids)
+            }
         } else {
             stopifnot(isTRUE(all.equal(result$coefficients, coefficients, tolerance = 1e-10)),
                       length(result$propensityScore) == length(result$rowIds))

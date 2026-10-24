@@ -13,7 +13,7 @@ Requirements
 For native Windows Server execution using the prepared offline R bundle, see
 [`windows/README_KO.md`](windows/README_KO.md). It includes offline installation,
 a no-database smoke test, concurrent Rscript roles, and RStudio Desktop setup.
-Docker and Python are not required for that workflow.
+Docker and Python are not required for that workflow. The Windows database default is YUHS on SQL Server, partitioned by visit care-site IDs 1/2/3 (Severance, Gangnam, Yongin), with disjoint patients and visit-linked clinical records. The previous PostgreSQL datasets require `-Dataset Example`. See the Korean guide for the distinct exposure/feature definitions and exclusion policy.
 
 - R 4.1.0 or newer. Package dependencies are declared in `DESCRIPTION`, including
   the required [Cyclops fork](https://github.com/taseong/Cyclops) pinned to
@@ -439,13 +439,13 @@ from Git.
 Development
 ===========
 
-Experimental (version 0.0.3). Tests use synthetic data in separate R processes
+Experimental (version 0.0.4). Tests use synthetic data in separate R processes
 to compare two- and three-site federated fits with pooled Cyclops, including
 row and feature alignment, matching, covariate balance and convergence handling.
 
 ```sh
 R CMD build .
-R CMD check FederatedPs_0.0.3.tar.gz
+R CMD check FederatedPs_0.0.4.tar.gz
 ```
 
 Building the PDF manual requires LaTeX. Use `R CMD check --no-manual` when it is

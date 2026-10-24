@@ -1,0 +1,179 @@
+# SQL Server care-site extraction is deliberately explicit: filtering the cohort
+# alone would still let FeatureExtraction read visits from other institutions.
+.validateCdmSchema <- function(schema) {
+    if (length(schema) != 1L || is.na(schema) ||
+        !grepl("^[A-Za-z_][A-Za-z0-9_]*([.][A-Za-z_][A-Za-z0-9_]*)?$", schema))
+        stop("Use an unquoted schema or database.schema identifier")
+    invisible(schema)
+}
+
+.validateCareSiteId <- function(id) {
+    if (length(id) != 1L || is.na(id) || !grepl("^[0-9]+$", as.character(id)) ||
+        as.numeric(id) < 1 || as.numeric(id) > .Machine$integer.max)
+        stop("careSiteId must be one positive integer from CARE_SITE (not CARE_SITE_SOURCE_VALUE)")
+    as.integer(id)
+}
+
+.careSiteAnalysis <- function(settings) {
+    result <- data.frame(analysisId = c(1L, 2L),
+        analysisName = c("Gender", "Age in five-year groups (index year minus birth year)"),
+        domainId = c("Demographics", "Demographics"), startDay = NA_integer_, endDay = NA_integer_)
+    for (window in c("long", if (settings$scenario == "studySpecific") "short")) {
+        result <- rbind(result, data.frame(analysisId = c(100L, 200L, 300L, 400L) +
+            if (window == "long") 1L else 2L,
+            analysisName = paste(c("Condition", "Drug", "Procedure", "Measurement"), window, "site-linked binary occurrence"),
+            domainId = c("Condition", "Drug", "Procedure", "Measurement"),
+            startDay = if (window == "long") settings$longTermStartDays else -30L, endDay = -1L))
+    }
+    result$isBinary <- "Y"
+    result$missingMeansZero <- "Y"
+    result
+}
+
+.careSiteClinicalSql <- function(schema, settings) {
+    .validateCdmSchema(schema)
+    domains <- list(c("CONDITION_OCCURRENCE", "condition_concept_id", "condition_start_date"),
+                    c("DRUG_EXPOSURE", "drug_concept_id", "drug_exposure_start_date"),
+                    c("PROCEDURE_OCCURRENCE", "procedure_concept_id", "procedure_date"),
+                    c("MEASUREMENT", "measurement_concept_id", "measurement_date"))
+    analysis <- .careSiteAnalysis(settings)
+    sql <- character()
+    for (i in 3:nrow(analysis)) {
+        a <- analysis[i, ]
+        d <- domains[[a$analysisId %/% 100L]]
+        sql <- c(sql, sprintf("SELECT DISTINCT c.row_id,
+            CAST(d.%s AS BIGINT) * 1000 + %d AS covariate_id, CAST(1 AS FLOAT) AS covariate_value
+            FROM #cohort_person c
+            JOIN %s.%s d ON d.person_id = c.subject_id
+            JOIN #fps_visit v ON v.visit_occurrence_id = d.visit_occurrence_id AND v.person_id = d.person_id
+            JOIN #fps_cutoff cutoff ON cutoff.subject_id = c.subject_id
+            WHERE d.%s > 0 AND d.%s BETWEEN DATEADD(DAY, %d, c.cohort_start_date) AND DATEADD(DAY, -1, c.cohort_start_date)
+              AND d.%s < cutoff.covariate_cutoff
+              AND NOT EXISTS (SELECT 1 FROM #fps_excluded x WHERE x.concept_id = d.%s)",
+            d[2], a$analysisId, schema, d[1], d[2], d[3], a$startDay, d[3], d[2]))
+    }
+    paste(sql, collapse = "\nUNION ALL\n")
+}
+
+.getCareSiteStudyData <- function(connection, schema, settings, careSiteId) {
+    careSiteId <- .validateCareSiteId(careSiteId)
+    .validateCdmSchema(schema)
+    query <- function(sql) DatabaseConnector::querySql(connection, sql, snakeCaseToCamelCase = TRUE)
+    run <- function(sql) DatabaseConnector::executeSql(connection, sql, progressBar = FALSE)
+    execute <- function(file, ...) {
+        path <- system.file("sql", "sql_server", file, package = "FederatedPs")
+        if (!nzchar(path)) stop("Missing SQL Server templates; reinstall FederatedPs")
+        sql <- paste(readLines(path, warn = FALSE), collapse = "\n")
+        run(SqlRender::render(sql, cdm_database_schema = schema, care_site_id = careSiteId, ...))
+    }
+    institution <- query(sprintf("SELECT care_site_id, care_site_name, care_site_source_value FROM %s.CARE_SITE WHERE care_site_id = %d", schema, careSiteId))
+    if (nrow(institution) != 1L) stop("Expected one CARE_SITE row for careSiteId ", careSiteId)
+    execute("SitePartition.sql")
+    partition <- query(sprintf("SELECT
+        (SELECT COUNT_BIG(*) FROM #fps_person) AS exclusive_persons,
+        (SELECT COUNT_BIG(*) FROM #fps_visit) AS linked_visits,
+        (SELECT COUNT_BIG(*) FROM #fps_membership WHERE institution_count > 1) AS multisite_persons_all_cdm,
+        (SELECT COUNT_BIG(*) FROM %s.VISIT_OCCURRENCE WHERE care_site_id IS NULL OR care_site_id <= 0) AS unattributed_visits_all_cdm", schema))
+    if (partition$exclusivePersons == 0) stop("No patients with visits exclusive to careSiteId ", careSiteId)
+    domains <- c("DRUG_EXPOSURE", "CONDITION_OCCURRENCE", "PROCEDURE_OCCURRENCE", "MEASUREMENT")
+    linkage <- do.call(rbind, lapply(domains, function(table) {
+        counts <- query(sprintf("SELECT COUNT_BIG(*) AS candidate_records,
+            COALESCE(SUM(CAST(CASE WHEN v.visit_occurrence_id IS NULL THEN 1 ELSE 0 END AS BIGINT)), 0) AS excluded_records
+            FROM %s.%s d JOIN #fps_person p ON p.person_id = d.person_id
+            LEFT JOIN #fps_visit v ON v.visit_occurrence_id = d.visit_occurrence_id AND v.person_id = d.person_id", schema, table))
+        data.frame(table = table, counts)
+    }))
+    # Keep aggregate diagnostics in the role log even if later cohort checks fail.
+    message("Exclusive persons: ", partition$exclusivePersons, "; linked visits: ", partition$linkedVisits,
+        "; multisite persons excluded (whole CDM): ", partition$multisitePersonsAllCdm)
+    for (i in seq_len(nrow(linkage))) message(linkage$table[i], ": ", linkage$excludedRecords[i],
+        " / ", linkage$candidateRecords[i], " records excluded by visit linkage")
+    specific <- settings$scenario == "studySpecific"
+    ingredients <- list("1" = settings$targetIngredients, "0" = settings$comparatorIngredients)
+    atc <- list("1" = settings$targetAtc, "0" = settings$comparatorAtc)
+    if (specific) {
+        ingredients[["-1"]] <- unique(c(unlist(ingredients), settings$extraWashoutIngredients))
+        atc[["-1"]] <- unique(c(unlist(atc), settings$washoutAtc))
+    }
+    values <- function(groups, quote = FALSE) {
+        rows <- unlist(lapply(names(groups), function(arm) {
+            ids <- groups[[arm]]
+            if (!length(ids)) return(character())
+            ids <- if (quote) paste0("'", ids, "'") else format(ids, scientific = FALSE, trim = TRUE)
+            paste0("(", arm, ", ", ids, ")")
+        }), use.names = FALSE)
+        if (!length(rows)) return(if (quote) "(1, '')" else "(1, 0)")
+        paste(rows, collapse = ", ")
+    }
+    execute("StudyConcepts.sql", ingredient_rows = values(ingredients), atc_rows = values(atc, TRUE))
+    missing <- query(sprintf("SELECT r.ingredient_id FROM #fps_requested_ingredients r WHERE NOT EXISTS (
+        SELECT 1 FROM %s.CONCEPT c WHERE c.concept_id = r.ingredient_id
+        AND c.concept_class_id = 'Ingredient' AND c.vocabulary_id IN ('RxNorm', 'RxNorm Extension'))", schema))
+    missingAtc <- query("SELECT r.code FROM #fps_requested_atc r WHERE NOT EXISTS (
+        SELECT 1 FROM #fps_atc_ingredients i WHERE i.arm = r.arm AND i.code = r.code)")
+    if (nrow(missing) || nrow(missingAtc)) stop("Incomplete ingredient/ATC vocabulary definitions")
+    resolved <- query("SELECT arm, ingredient_id FROM #fps_ingredients ORDER BY arm, ingredient_id")
+    target <- resolved$ingredientId[resolved$arm == 1]
+    comparator <- resolved$ingredientId[resolved$arm == 0]
+    if (!length(target) || !length(comparator) || length(intersect(target, comparator)))
+        stop("Target and comparator must resolve to nonempty, disjoint ingredient sets")
+    if (specific) {
+        roots <- query(sprintf("SELECT concept_id FROM %s.CONCEPT WHERE domain_id = 'Condition'
+            AND standard_concept = 'S' AND concept_id IN (%s)", schema, paste(settings$indicationConceptIds, collapse = ",")))
+        if (!setequal(roots$conceptId, settings$indicationConceptIds)) stop("Missing indication concepts")
+        execute("SpecificStudy.sql", form_policy = settings$formPolicy,
+            indication_concept_ids = settings$indicationConceptIds,
+            record_type_concept_ids = settings$recordTypeConceptIds, min_age = settings$minAge,
+            prior_days = settings$priorObservationDays, indication_days = settings$indicationDays,
+            washout_days = settings$washoutDays)
+    } else execute("DefaultStudy.sql")
+    sql <- SqlRender::loadRenderTranslateSql("CreateOrCountCohorts.sql", packageName = "CohortMethod",
+        dbms = "sql server", cdm_database_schema = schema,
+        exposure_database_schema = "tempdb.dbo", exposure_table = "#fps_exposure",
+        target_id = 1, comparator_id = 2, first_only = TRUE,
+        remove_duplicate_subjects = "keep first, truncate to second",
+        washout_period = settings$priorObservationDays, min_age = if (specific) "" else settings$minAge,
+        restrict_to_common_period = FALSE, action = "CREATE")
+    # YUHS table names are uppercase (also works on case-insensitive databases).
+    for (table in c("person", "observation_period"))
+        sql <- gsub(paste0(schema, ".", table), paste0(schema, ".", toupper(table)), sql, fixed = TRUE)
+    run(sql)
+    cohorts <- query(SqlRender::loadRenderTranslateSql("GetCohorts.sql", packageName = "CohortMethod",
+        dbms = "sql server", target_id = 1, cohortTable = "#cohort_person"))
+    cohorts$rowId <- as.numeric(cohorts$rowId)
+    if (anyNA(cohorts$rowId) || anyDuplicated(cohorts$rowId) || anyDuplicated(cohorts$personId))
+        stop("Expected one row per person; inspect native observation periods")
+    counts <- c(target = sum(cohorts$treatment == 1), comparator = sum(cohorts$treatment == 0))
+    message("care_site_id ", careSiteId, ": target = ", counts[1], ", comparator = ", counts[2])
+    if (any(counts == 0)) stop("Both treatment groups are required; study criteria were not relaxed")
+    execute("Covariates.sql", clinical_sql = .careSiteClinicalSql(schema, settings))
+    data <- Andromeda::andromeda()
+    complete <- FALSE
+    on.exit(if (!complete) Andromeda::close(data), add = TRUE)
+    DatabaseConnector::querySqlToAndromeda(connection, "SELECT row_id, covariate_id, covariate_value FROM #fps_covariates",
+        andromeda = data, andromedaTableName = "covariates", snakeCaseToCamelCase = TRUE)
+    DatabaseConnector::querySqlToAndromeda(connection, sprintf("SELECT DISTINCT f.covariate_id,
+        f.covariate_id %% 1000 AS analysis_id,
+        CASE WHEN f.covariate_id %% 1000 = 2 THEN 0 ELSE f.covariate_id / 1000 END AS concept_id,
+        CASE WHEN f.covariate_id %% 1000 = 2 THEN CONCAT('Age group ', CAST(f.covariate_id / 1000 * 5 AS VARCHAR(20)))
+             ELSE COALESCE(c.concept_name, 'Unknown concept') END AS covariate_name
+        FROM #fps_covariates f LEFT JOIN %s.CONCEPT c ON c.concept_id = f.covariate_id / 1000", schema),
+        andromeda = data, andromedaTableName = "covariateRef", snakeCaseToCamelCase = TRUE)
+    data$analysisRef <- .careSiteAnalysis(settings)
+    data$cohorts <- cohorts
+    data$outcomes <- data.frame(rowId = numeric(), outcomeId = numeric(), daysToEvent = numeric())
+    # Shared model contract must not include an institution's ID or name.
+    settings$definitionVersion <- 2L
+    settings$exposureSource <- "visit-linked drug_exposure (not pooled drug_era)"
+    settings$featureDefinition <- "care-site-binary-v1"
+    settings$partitionPolicy <- "exclude persons visiting multiple positive care_site_ids"
+    attr(data, "metaData") <- list(targetId = 1, comparatorId = 2, studyDefinition = settings,
+        resolvedIngredients = resolved, careSite = institution, sitePartition = partition,
+        recordLinkage = linkage, attrition = data.frame(description = "Site-local study-eligible subjects",
+            targetPersons = counts[1], comparatorPersons = counts[2],
+            targetExposures = counts[1], comparatorExposures = counts[2]))
+    class(data) <- "CohortMethodData"
+    attr(class(data), "package") <- "CohortMethod"
+    complete <- TRUE
+    data
+}

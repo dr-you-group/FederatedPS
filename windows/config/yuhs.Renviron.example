@@ -1,0 +1,9 @@
+# SQL authentication. Keep the actual credentials in the ignored yuhs.Renviron.
+# Set the internal DNS name matching the SQL Server TLS certificate.
+DBMS="sql server"
+DB_SERVER=
+DB_PORT=1433
+DB_DATABASE=CDM54_2601
+DB_USER=
+DB_PASSWORD=
+CDM_DATABASE_SCHEMA=CDM54_2601.CDM

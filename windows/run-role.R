@@ -22,16 +22,31 @@ if (role == "aggregator") {
                                         timeout = config$exchangeTimeout)
 } else if (config$mode == "Database") {
     result <- local({
-        connection <- fp_read_connection(file.path(config$configDirectory, paste0(role, ".Renviron")))
+        yuhs <- config$dataset == "YUHS"
+        if (yuhs) fp_check_yuhs_sites(config)
+        connection <- if (yuhs) fp_read_yuhs_connection(file.path(config$configDirectory, "yuhs.Renviron")) else
+            fp_read_connection(file.path(config$configDirectory, paste0(role, ".Renviron")))
         data <- FederatedPs::getDbStudyData(connectionDetails = connection,
             cdmDatabaseSchema = Sys.getenv("CDM_DATABASE_SCHEMA"),
-            study = config$study, scenario = config$scenario)
+            study = config$study, scenario = config$scenario,
+            careSiteId = if (yuhs) config$careSites[[role]] else NULL)
         on.exit(Andromeda::close(data))
+        if (yuhs) {
+            metadata <- attr(data, "metaData")
+            saveRDS(metadata, file.path(out, "extraction-metadata.rds"))
+            for (name in c("careSite", "sitePartition", "recordLinkage", "attrition"))
+                write.csv(metadata[[name]], file.path(out, paste0(name, ".csv")), row.names = FALSE, fileEncoding = "UTF-8")
+        }
         population <- CohortMethod::createStudyPopulation(data,
             createStudyPopulationArgs = CohortMethod::createCreateStudyPopulationArgs(
                 removeSubjectsWithPriorOutcome = FALSE, minDaysAtRisk = 0))
-        FederatedPs::fitPs(data, population, config = pda_config, runId = config$runId,
+        fitted <- FederatedPs::fitPs(data, population, config = pda_config, runId = config$runId,
             priorVariance = 1, control = fp_control(config), timeout = config$exchangeTimeout)
+        if (yuhs) {
+            fitted <- fp_attach_person_ids(fitted, dplyr::collect(data$cohorts))
+            attr(fitted, "metaData")$careSiteId <- config$careSites[[role]]
+        }
+        fitted
     })
 } else {
     if (config$mode == "Synthetic") {

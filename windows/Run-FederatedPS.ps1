@@ -2,7 +2,8 @@
 [CmdletBinding()]
 param(
     [ValidateSet('Synthetic','Database','Design')][string]$Mode = 'Synthetic',
-    [string[]]$Sites = @('mimic','synpuf'),
+    [ValidateSet('YUHS','Example')][string]$Dataset = 'YUHS',
+    [string[]]$Sites = @(),
     [string]$RunId = ([guid]::NewGuid().ToString('N')),
     [string]$Study = 'ppi',
     [ValidateSet('default','studySpecific')][string]$Scenario = 'default',
@@ -17,6 +18,10 @@ param(
     [string]$RHome = 'C:\Program Files\R\R-4.6.1', [string]$JavaHome = ''
 )
 . (Join-Path $PSScriptRoot 'Common.ps1')
+$careSites = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'config\yuhs-sites.json') -Encoding UTF8 -Raw | ConvertFrom-Json
+if ($Sites.Count -eq 0) {
+    $Sites = if ($Dataset -eq 'YUHS') { @($careSites.PSObject.Properties.Name) } else { @('mimic','synpuf','ehrshot') }
+}
 Assert-FederatedNames $RunId $Sites
 $project = Get-FederatedProject
 $runtime = Set-FederatedEnvironment -InstallRoot $InstallRoot -RHome $RHome -JavaHome $JavaHome
@@ -24,9 +29,18 @@ if (-not $ConfigDirectory) { $ConfigDirectory = Join-Path $PSScriptRoot 'config'
 if (-not $WorkDirectory) { $WorkDirectory = Join-Path $project 'work\windows' }
 if (-not $ExchangeDirectory) { $ExchangeDirectory = Join-Path $project 'exchange\windows' }
 if ($Mode -eq 'Database') {
-    foreach ($site in $Sites) {
-        if (-not (Test-Path -LiteralPath (Join-Path $ConfigDirectory "$site.Renviron") -PathType Leaf)) {
-            throw "Missing $site.Renviron in $ConfigDirectory. Copy and edit the example for this site."
+    if ($Dataset -eq 'YUHS') {
+        foreach ($site in $Sites) {
+            if ($site -cnotin @($careSites.PSObject.Properties.Name)) { throw "Unknown YUHS site: $site" }
+        }
+        if (-not (Test-Path -LiteralPath (Join-Path $ConfigDirectory 'yuhs.Renviron') -PathType Leaf)) {
+            throw 'Copy yuhs.Renviron.example to yuhs.Renviron and set the SQL Server connection.'
+        }
+    } else {
+        foreach ($site in $Sites) {
+            if (-not (Test-Path -LiteralPath (Join-Path $ConfigDirectory "$site.Renviron") -PathType Leaf)) {
+                throw "Missing $site.Renviron in $ConfigDirectory. Copy and edit the example for this site."
+            }
         }
     }
 }
@@ -48,7 +62,8 @@ New-Item -ItemType Directory -Path $ExchangeDirectory -Force | Out-Null
 New-Item -ItemType Directory -Path $output -ErrorAction Stop | Out-Null
 New-Item -ItemType Directory -Path $exchange -ErrorAction Stop | Out-Null
 $config = [ordered]@{
-    project = $project; mode = $Mode; runId = $RunId; sites = @($Sites)
+    project = $project; mode = $Mode; dataset = $Dataset; runId = $RunId; sites = @($Sites)
+    careSites = $(if ($Dataset -eq 'YUHS') { $careSites } else { $null })
     study = $Study; scenario = $Scenario; blockSize = $BlockSize; alpha = $Alpha
     tolerance = $Tolerance; exchangeTimeout = $ExchangeTimeoutSeconds
     output = $output; exchange = $exchange
@@ -61,9 +76,10 @@ $configFile = Join-Path $output 'run.json'
 Invoke-FederatedR $runtime.Rscript @((Join-Path $PSScriptRoot 'preflight.R'), $configFile)
 $workers = @()
 try {
-    # Each hospital loads its own file. The aggregator must not inherit a
-    # previous hospital's PG* credentials from the invoking PowerShell session.
-    $connectionKeys = @('PGHOST','PGPORT','PGDATABASE','PGUSER','PGPASSWORD','CDM_DATABASE_SCHEMA')
+    # Site workers load connection settings themselves. The aggregator must not
+    # inherit database credentials from the invoking PowerShell session.
+    $connectionKeys = @('PGHOST','PGPORT','PGDATABASE','PGUSER','PGPASSWORD','CDM_DATABASE_SCHEMA',
+        'DBMS','DB_SERVER','DB_PORT','DB_DATABASE','DB_USER','DB_PASSWORD')
     $savedConnection = @{}
     foreach ($key in $connectionKeys) {
         $savedConnection[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')

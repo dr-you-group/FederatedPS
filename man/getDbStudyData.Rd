@@ -2,25 +2,28 @@
 % Please edit documentation in R/StudyData.R
 \name{getDbStudyData}
 \alias{getDbStudyData}
-\title{Prepare a named study from a PostgreSQL OMOP CDM}
+\title{Prepare a named study from an OMOP CDM}
 \usage{
 getDbStudyData(
   connectionDetails,
   cdmDatabaseSchema,
   study = "opioid",
-  scenario = c("default", "studySpecific")
+  scenario = c("default", "studySpecific"),
+  careSiteId = NULL
 )
 }
 \arguments{
 \item{connectionDetails}{A \code{\link[DatabaseConnector:createConnectionDetails]{DatabaseConnector::createConnectionDetails()}}
-object for PostgreSQL, as used by CDM-loader.}
+object for PostgreSQL, or SQL Server for a care-site partition.}
 
 \item{cdmDatabaseSchema}{Unquoted CDM schema name containing clinical and
-vocabulary tables, for example \code{mimiciv}, \code{synpuf} or \code{ehrshot}.}
+vocabulary tables. SQL Server also accepts \code{database.schema}.}
 
 \item{study}{Name from \code{\link[=listStudies]{listStudies()}}.}
 
 \item{scenario}{Design from \code{\link[=getStudySettings]{getStudySettings()}}.}
+\item{careSiteId}{SQL Server institution ID from CARE_SITE, linked through
+VISIT_OCCURRENCE. Required on SQL Server; leave NULL on PostgreSQL.}
 }
 \value{
 Hospital-local \link[CohortMethod:CohortMethodData]{CohortMethod::CohortMethodData} for \code{\link[=fitPs]{fitPs()}}.
@@ -29,10 +32,19 @@ and the final cohort counts in \code{attrition}. No outcomes are extracted.
 The caller must close the object with \code{Andromeda::close()}.
 }
 \description{
-Prepare a named study from a PostgreSQL OMOP CDM
+Prepare a named study from an OMOP CDM
 }
 \details{
-Uses a dedicated connection and session-local tables/views; source
+On SQL Server, excludes persons with visits at multiple positive care-site IDs;
+only events linked to an institution's visit (including matching person ID) are
+used. Unlinked events are excluded. Uses visit-linked drug exposures instead of
+pooled drug eras. Explicit binary covariates use the care-site-binary-v1 contract:
+gender, five-year age groups, condition, drug, procedure and measurement occurrence.
+This feature ID scheme and exposure definition must not be mixed with PostgreSQL
+extracts in one model. Site metadata and record-linkage counts are returned in
+metaData. Native observation periods are retained. See windows/README_KO.md.
+
+The PostgreSQL path uses a dedicated connection and session-local tables/views; source
 CDM tables are not changed. CohortMethod's installed cohort SQL retains its
 native observation-period join. FeatureExtraction supplies age group, sex
 and binary condition, drug, procedure and measurement occurrence features.

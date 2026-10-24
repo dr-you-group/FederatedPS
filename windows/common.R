@@ -32,29 +32,82 @@ fp_verify_runtime <- function(project) {
     if (!identical(getFromNamespace(".protocolVersion", "FederatedPs"), lock$protocol))
         stop("FederatedPs protocol differs from runtime-lock.json")
     jar <- Sys.getenv("DATABASECONNECTOR_JAR_FOLDER")
-    if (!nzchar(jar) || !length(list.files(jar, "postgresql.*[.]jar$", ignore.case = TRUE)))
-        stop("PostgreSQL JDBC driver missing from DATABASECONNECTOR_JAR_FOLDER")
+    if (!nzchar(jar) || !dir.exists(jar)) stop("DATABASECONNECTOR_JAR_FOLDER is missing")
+    if (!file.exists(file.path(jar, "sqlserver", lock$sqlServerJar)))
+        stop("SQL Server JDBC missing; transfer the new payload and run Install-Offline.ps1")
     rJava::.jinit()
     if (!"ppi" %in% FederatedPs::listStudies()$study) stop("Study metadata missing")
     cat("PASS: offline R, block Cyclops, FederatedPs, JVM and JDBC\n")
     invisible(TRUE)
 }
 
-fp_read_connection <- function(path) {
-    keys <- c("PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD", "CDM_DATABASE_SCHEMA")
+fp_connection_keys <- function() c("PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD",
+    "CDM_DATABASE_SCHEMA", "DBMS", "DB_SERVER", "DB_PORT", "DB_DATABASE", "DB_USER", "DB_PASSWORD")
+
+fp_read_connection_values <- function(path, yuhs = FALSE) {
+    keys <- if (yuhs) c("DBMS", "DB_SERVER", "DB_PORT", "DB_DATABASE", "DB_USER", "DB_PASSWORD", "CDM_DATABASE_SCHEMA") else
+        c("PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD", "CDM_DATABASE_SCHEMA")
     # A process must not silently inherit another hospital's connection values.
-    Sys.unsetenv(keys)
+    Sys.unsetenv(fp_connection_keys())
     if (!file.exists(path) || !readRenviron(path)) stop("Cannot read site settings: ", path)
-    values <- Sys.getenv(keys)
-    missing <- keys[!nzchar(values)]
+    values <- as.list(Sys.getenv(keys))
+    names(values) <- keys
+    missing <- keys[!nzchar(unlist(values))]
     if (length(missing)) stop("Missing connection fields: ", paste(missing, collapse = ", "))
-    if (identical(Sys.getenv("PGHOST"), "host.docker.internal"))
+    host <- values[[if (yuhs) "DB_SERVER" else "PGHOST"]]
+    if (identical(host, "host.docker.internal"))
         stop("Replace the Docker host alias with a database IP/DNS reachable from Windows")
-    port <- suppressWarnings(as.integer(Sys.getenv("PGPORT")))
-    if (is.na(port) || port < 1L || port > 65535L) stop("Invalid PGPORT")
+    port <- values[[if (yuhs) "DB_PORT" else "PGPORT"]]
+    if (!grepl("^[0-9]+$", port) || as.numeric(port) < 1 || as.numeric(port) > 65535)
+        stop("Invalid database port")
+    if (yuhs) {
+        if (values$DBMS != "sql server") stop("YUHS requires DBMS='sql server'")
+        if (!grepl("^[A-Za-z0-9_.-]+$", host)) stop("DB_SERVER must be a host/IP without JDBC properties or a port")
+        if (!grepl("^[A-Za-z_][A-Za-z0-9_]*$", values$DB_DATABASE) ||
+            !grepl("^[A-Za-z_][A-Za-z0-9_]*[.][A-Za-z_][A-Za-z0-9_]*$", values$CDM_DATABASE_SCHEMA))
+            stop("YUHS requires DB_DATABASE and a database.schema CDM_DATABASE_SCHEMA")
+        if (strsplit(values$CDM_DATABASE_SCHEMA, ".", fixed = TRUE)[[1]][1] != values$DB_DATABASE)
+            stop("CDM_DATABASE_SCHEMA must be in DB_DATABASE")
+    }
+    values
+}
+
+fp_read_connection <- function(path) {
+    values <- fp_read_connection_values(path)
+    # Capture literal values: DatabaseConnector stores lazy credential closures.
     DatabaseConnector::createConnectionDetails(dbms = "postgresql",
-        server = paste(Sys.getenv("PGHOST"), Sys.getenv("PGDATABASE"), sep = "/"),
-        port = port, user = Sys.getenv("PGUSER"), password = Sys.getenv("PGPASSWORD"))
+        server = paste(values$PGHOST, values$PGDATABASE, sep = "/"),
+        port = as.integer(values$PGPORT), user = values$PGUSER, password = values$PGPASSWORD)
+}
+
+fp_read_yuhs_connection <- function(path) {
+    values <- fp_read_connection_values(path, yuhs = TRUE)
+    driver <- file.path(Sys.getenv("DATABASECONNECTOR_JAR_FOLDER"), "sqlserver")
+    if (!length(list.files(driver, "^mssql-jdbc.*[.]jar$"))) stop("Offline SQL Server JDBC missing")
+    DatabaseConnector::createConnectionDetails(dbms = "sql server", server = values$DB_SERVER,
+        port = as.integer(values$DB_PORT), user = values$DB_USER, password = values$DB_PASSWORD,
+        extraSettings = paste0("databaseName=", values$DB_DATABASE,
+            ";encrypt=true;trustServerCertificate=false"), pathToDriver = driver)
+}
+
+fp_check_yuhs_sites <- function(config) {
+    ids <- unlist(config$careSites[config$sites], use.names = FALSE)
+    if (length(ids) != length(config$sites) || anyNA(ids) || anyDuplicated(ids) ||
+        any(!grepl("^[0-9]+$", as.character(ids))) || any(as.numeric(ids) < 1) ||
+        any(as.numeric(ids) > .Machine$integer.max)) stop("Distinct positive CARE_SITE_IDs are required for every YUHS site")
+    invisible(ids)
+}
+
+fp_attach_person_ids <- function(population, cohorts) {
+    # CohortMethod::createStudyPopulation deliberately removes personId.
+    # Restore it only in the hospital-local result, using rowId (never row order).
+    if (!all(c("rowId", "personId") %in% names(cohorts)) || anyNA(cohorts$rowId) ||
+        anyDuplicated(cohorts$rowId)) stop("Invalid local cohort/person mapping")
+    index <- match(population$rowId, cohorts$rowId)
+    if (anyNA(index) || anyNA(cohorts$personId[index]) || anyDuplicated(cohorts$personId[index]))
+        stop("Missing or duplicate local PERSON_ID mapping")
+    population$personId <- as.character(cohorts$personId[index])
+    population
 }
 
 fp_control <- function(config) {
