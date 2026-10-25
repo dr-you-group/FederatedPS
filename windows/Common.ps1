@@ -29,7 +29,14 @@ function Set-FederatedEnvironment {
     if (-not [Environment]::Is64BitProcess) { throw 'Use 64-bit PowerShell.' }
     $base = Join-Path $InstallRoot 'RLibrary\4.6'
     $overlay = Join-Path $InstallRoot 'RLibrary\windows-block'
-    $rscript = Join-Path $RHome 'bin\Rscript.exe'
+    # bin/Rscript.exe is R's architecture-selection wrapper (Rfe.exe).
+    # Its child performs the actual R work. The pinned x64 installation's
+    # architecture executable runs R directly, retaining normal Rscript
+    # semantics while making Process.Id equal Sys.getpid() in role events.
+    $rscript = Join-Path $RHome 'bin\x64\Rscript.exe'
+    if (-not (Test-Path -LiteralPath $rscript -PathType Leaf)) {
+        throw "Direct x64 Rscript.exe not found: $rscript. Repair the pinned x64 R installation; the bin wrapper is not a safe fallback."
+    }
     $jdbc = Join-Path $InstallRoot 'jdbc'
     foreach ($path in @($base, $rscript, $jdbc)) {
         if (-not (Test-Path -LiteralPath $path)) { throw "Offline prerequisite missing: $path. Complete bundle steps 10-13 first." }
@@ -69,6 +76,57 @@ function ConvertTo-NativeArgument([AllowEmptyString()][string]$Value) {
     '"' + [regex]::Replace([regex]::Replace($Value, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"'
 }
 
+function Start-FederatedRWorker {
+    param($Runtime, [string]$Script, [string[]]$Arguments = @(),
+          [string]$WorkingDirectory, [string]$LogPrefix, [string]$Role)
+    if (-not $Runtime.PSObject.Properties['Rscript'] -or -not $Runtime.Rscript) {
+        throw 'The runtime has no direct Rscript interpreter. Refresh Set-FederatedEnvironment.'
+    }
+    if (-not (Test-Path -LiteralPath $Script -PathType Leaf)) { throw "R script not found: $Script" }
+    $scriptPath = [IO.Path]::GetFullPath($Script)
+    Start-FederatedWorker -Executable $Runtime.Rscript `
+        -Arguments (@('--vanilla', $scriptPath) + @($Arguments)) `
+        -WorkingDirectory $WorkingDirectory -LogPrefix $LogPrefix -Role $Role
+}
+
+function Stop-FederatedProcessTree([System.Diagnostics.Process]$Process) {
+    $Process.Refresh()
+    if ($Process.HasExited) { return }
+    if ($env:OS -eq 'Windows_NT') {
+        # PowerShell 5.1/.NET Framework has no Process.Kill(entireProcessTree).
+        # Use the Windows utility only for this live, retained process handle;
+        # never look up an arbitrary saved PID and terminate it.
+        $killer = New-Object System.Diagnostics.Process
+        try {
+            $killer.StartInfo.FileName = Join-Path $env:SystemRoot 'System32\taskkill.exe'
+            $killer.StartInfo.Arguments = '/PID ' + [string]$Process.Id + ' /T /F'
+            $killer.StartInfo.UseShellExecute = $false
+            $killer.StartInfo.CreateNoWindow = $true
+            $killer.StartInfo.RedirectStandardOutput = $true
+            $killer.StartInfo.RedirectStandardError = $true
+            if (-not $killer.Start()) { throw 'Could not start taskkill for the owned worker.' }
+            $output = $killer.StandardOutput.ReadToEndAsync()
+            $errorOutput = $killer.StandardError.ReadToEndAsync()
+            if (-not $killer.WaitForExit(10000)) {
+                $killer.Kill()
+                throw 'Timed out terminating the owned worker process tree.'
+            }
+            [void]$output.GetAwaiter().GetResult()
+            $killError = $errorOutput.GetAwaiter().GetResult()
+            $Process.Refresh()
+            if ($killer.ExitCode -ne 0) {
+                throw ('Could not verify termination of the complete owned worker tree (taskkill exit ' +
+                    $killer.ExitCode + '): ' + $killError)
+            }
+        } finally { $killer.Dispose() }
+    } else {
+        # Non-Windows is used by the launcher regression tests only.
+        $treeKill = $Process.GetType().GetMethod('Kill', [type[]]@([bool]))
+        if ($null -ne $treeKill) { $Process.Kill($true) } else { $Process.Kill() }
+    }
+    if (-not $Process.WaitForExit(10000)) { throw 'Owned worker did not exit after termination.' }
+}
+
 function Start-FederatedWorker {
     param([string]$Executable, [string[]]$Arguments, [string]$WorkingDirectory,
           [string]$LogPrefix, [string]$Role)
@@ -103,14 +161,19 @@ function Start-FederatedWorker {
         [pscustomobject]@{
             Role = $Role; Process = $process; LogPrefix = $LogPrefix
             StdoutStream = $stdout; StderrStream = $stderr
-            StdoutTask = $stdoutTask; StderrTask = $stderrTask; Completed = $false
+            StdoutTask = $stdoutTask; StderrTask = $stderrTask; Completed = $false; FinalExitCode = $null
         }
     } catch {
-        if ($started -and -not $process.HasExited) { $process.Kill(); $process.WaitForExit() }
-        if ($null -ne $stdout) { $stdout.Dispose() }
-        if ($null -ne $stderr) { $stderr.Dispose() }
-        $process.Dispose()
-        throw
+        $startFailure = $_
+        try {
+            if ($started -and -not $process.HasExited) { Stop-FederatedProcessTree $process }
+        } catch { Write-Warning "Cleanup after worker startup failure: $($_.Exception.Message)" }
+        finally {
+            if ($null -ne $stdout) { $stdout.Dispose() }
+            if ($null -ne $stderr) { $stderr.Dispose() }
+            $process.Dispose()
+        }
+        throw $startFailure
     }
 }
 
@@ -137,6 +200,7 @@ function Wait-FederatedWorkers([object[]]$Workers, [int]$TimeoutSeconds, $Monito
                 $worker.StdoutStream.Dispose()
                 $worker.StderrStream.Dispose()
                 $exitCode = $worker.Process.ExitCode
+                if ($worker.PSObject.Properties['FinalExitCode']) { $worker.FinalExitCode = $exitCode }
                 if ($null -eq $exitCode) {
                     throw "No exit code was available for role $($worker.Role). Completion cannot be verified. See $($worker.LogPrefix).stderr.log"
                 }
@@ -155,7 +219,10 @@ function Wait-FederatedWorkers([object[]]$Workers, [int]$TimeoutSeconds, $Monito
 function Stop-FederatedWorkers([object[]]$Workers) {
     foreach ($worker in $Workers) {
         try {
-            if (-not $worker.Process.HasExited) { $worker.Process.Kill(); $worker.Process.WaitForExit() }
+            Stop-FederatedProcessTree $worker.Process
+            if ($worker.Process.HasExited -and $worker.PSObject.Properties['FinalExitCode']) {
+                $worker.FinalExitCode = $worker.Process.ExitCode
+            }
             # Bound pipe cleanup as a descendant could still hold an inherited
             # pipe open. Do not let cleanup hide the original role/timeout error.
             $tasks = [System.Threading.Tasks.Task[]]@($worker.StdoutTask, $worker.StderrTask)
@@ -165,6 +232,11 @@ function Stop-FederatedWorkers([object[]]$Workers) {
         } catch {
             Write-Warning "Cleanup for role $($worker.Role): $($_.Exception.Message)"
         } finally {
+            try {
+                if ($worker.Process.HasExited -and $worker.PSObject.Properties['FinalExitCode']) {
+                    $worker.FinalExitCode = $worker.Process.ExitCode
+                }
+            } catch { }
             $worker.Process.StandardOutput.Dispose()
             $worker.Process.StandardError.Dispose()
             $worker.StdoutStream.Dispose()

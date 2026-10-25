@@ -15,7 +15,7 @@ function Get-FederatedProject { $PSScriptRoot }
 function Assert-FederatedNames { param($RunId,$Sites) }
 function Set-FederatedEnvironment { param($InstallRoot,$RHome,$JavaHome); @{Rscript='unused'} }
 function Invoke-FederatedR { param($Rscript,$Arguments) }
-function Start-FederatedWorker { param($Executable,$Arguments,$WorkingDirectory,$LogPrefix,$Role)
+function Start-FederatedRWorker { param($Runtime,$Script,$Arguments,$WorkingDirectory,$LogPrefix,$Role)
     if ($Role -eq 'verification') { [IO.File]::WriteAllText((Join-Path (Split-Path (Split-Path $LogPrefix -Parent) -Parent) 'SUCCESS.txt'),'fixture') }
     [pscustomobject]@{ Role=$Role }
 }
@@ -28,10 +28,12 @@ function Stop-FederatedWorkers { param($Workers) }
     & $run -WorkDirectory (Join-Path $temp 'default') -ExchangeDirectory (Join-Path $temp 'exchange')
     $json = Get-ChildItem -Path (Join-Path $temp 'default') -Filter run.json -Recurse
     $config = Get-Content -LiteralPath $json.FullName -Raw | ConvertFrom-Json
+    if ($config.initialTimeout -ne 21600 -or $config.smallQueryTimeout -ne 60 -or $config.dbQueryTimeout -ne 7200) { throw 'Timeout defaults lost.' }
     if ($config.mode -ne 'SyntheticCDM' -or -not $config.test) { throw 'Default must select synthetic CDM.' }
-    & $run -Test $true -BlockSize 4 -Alpha 0.5 -WorkDirectory (Join-Path $temp 'explicit') -ExchangeDirectory (Join-Path $temp 'exchange')
+    & $run -Test $true -BlockSize 4 -Alpha 0.5 -InitialTimeoutSeconds 9000 -SmallQueryTimeoutSeconds 45 -DbQueryTimeoutSeconds 1200 -WorkDirectory (Join-Path $temp 'explicit') -ExchangeDirectory (Join-Path $temp 'exchange')
     $json = Get-ChildItem -Path (Join-Path $temp 'explicit') -Filter run.json -Recurse
     $config = Get-Content -LiteralPath $json.FullName -Raw | ConvertFrom-Json
+    if ($config.initialTimeout -ne 9000 -or $config.smallQueryTimeout -ne 45 -or $config.dbQueryTimeout -ne 1200) { throw 'Explicit timeout settings lost.' }
     if ($config.mode -ne 'SyntheticCDM' -or $config.blockSize -ne 4 -or $config.alpha -ne 0.5) { throw 'Parameters lost.' }
     # Even an existing malformed DB configuration must be ignored in test mode.
     'not a connection file' | Set-Content (Join-Path $temp 'config\yuhs.Renviron')

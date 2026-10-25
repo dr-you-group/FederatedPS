@@ -40,9 +40,12 @@ getDbStudyData <- function(connectionDetails, cdmDatabaseSchema, study = "opioid
     settings <- getStudySettings(study, scenario)
     .validateCdmSchema(cdmDatabaseSchema)
     .fpsProgress("connecting", "Opening database connection")
-    connection <- DatabaseConnector::connect(connectionDetails)
+    connection <- .fpsDbOperation("Opening database connection",
+        DatabaseConnector::connect(connectionDetails), stage = "connecting")
+    # A timeout can already have closed JDBC. Cleanup must not replace the
+    # original classified error used for the safe initial-connection retry.
+    on.exit(try(DatabaseConnector::disconnect(connection), silent = TRUE), add = TRUE)
     .fpsProgress("connected", "Database connection established")
-    on.exit(DatabaseConnector::disconnect(connection), add = TRUE)
     dbms <- DatabaseConnector::dbms(connection)
     if (identical(dbms, "sql server")) {
         return(.getCareSiteStudyData(connection, cdmDatabaseSchema, settings, careSiteId))

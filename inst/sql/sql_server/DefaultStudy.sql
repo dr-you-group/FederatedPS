@@ -6,3 +6,9 @@ SELECT DISTINCT person_id AS subject_id,
        index_date AS covariate_cutoff
 INTO #fps_exposure
 FROM #fps_drug WHERE arm >= 0;
+
+-- CohortMethod orders these rows by subject/start date and joins first-use
+-- records back by subject. Index only this session-local temp table; retain
+-- every exposure row and leave first-use/tie handling to CohortMethod.
+CREATE CLUSTERED INDEX ix_fps_exposure_subject_start
+    ON #fps_exposure(subject_id, cohort_start_date, cohort_definition_id);

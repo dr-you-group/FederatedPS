@@ -4,7 +4,7 @@
 \alias{aggregatePs}
 \title{Aggregate plaintext Cyclops statistics}
 \usage{
-aggregatePs(config, sites, runId, timeout = 300)
+aggregatePs(config, sites, runId, timeout = 300, initialTimeout = timeout)
 }
 \arguments{
 \item{config}{Aggregator configuration from \code{\link[pda:getCloudConfig]{pda::getCloudConfig()}}.}
@@ -14,6 +14,8 @@ aggregatePs(config, sites, runId, timeout = 300)
 \item{runId}{New alphanumeric identifier shared by all hospitals.}
 
 \item{timeout}{Seconds to wait for each exchange.}
+
+\item{initialTimeout}{Seconds to wait during feature negotiation, including database extraction at slower sites. Defaults to \code{timeout}.}
 }
 \value{
 Invisibly returns the common named coefficient vector.

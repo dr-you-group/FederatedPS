@@ -4,12 +4,15 @@
 #' @param sites Hospital identifiers matching their pda configurations.
 #' @param runId New alphanumeric identifier shared by all hospitals.
 #' @param timeout Seconds to wait for each exchange.
+#' @param initialTimeout Seconds to wait during feature negotiation, including
+#'   database extraction at slower sites. Defaults to `timeout`.
 #' @return Invisibly returns the common named coefficient vector.
 #' @details Run concurrently with one `fitPs()` call at each hospital.
 #'   The aggregator receives feature definitions, model settings and statistics,
 #'   never patient rows. The common Laplace prior is included only once.
 #' @export
-aggregatePs <- function(config, sites, runId, timeout = 300) {
+aggregatePs <- function(config, sites, runId, timeout = 300, initialTimeout = timeout) {
+    .validateExchangeTimeouts(timeout, initialTimeout)
     if (length(sites) < 2L || anyDuplicated(sites) || "total" %in% sites ||
         !all(grepl("^[A-Za-z0-9]+$", c(runId, sites)))) stop("Provide distinct alphanumeric hospital identifiers")
     if (paste0(runId, "_0_total") %in% pda::pdaList(config)) stop("Use a new runId")
@@ -28,7 +31,8 @@ aggregatePs <- function(config, sites, runId, timeout = 300) {
             dir.create(roundConfig$dir, recursive = TRUE, showWarnings = FALSE)
         }
         replies <- list()
-        for (site in sites) replies[[site]] <- .getPs(paste0(key, "_", site), roundConfig, timeout)
+        wait <- if (is.na(nCoefficients)) initialTimeout else timeout
+        for (site in sites) replies[[site]] <- .getPs(paste0(key, "_", site), roundConfig, wait)
         coordinate <- replies[[1L]]$coordinate
         values <- list()
         for (site in sites) {
@@ -100,6 +104,17 @@ aggregatePs <- function(config, sites, runId, timeout = 300) {
 # Protocol identifier.  Hospitals and the aggregator must agree exactly; a
 # mismatch means one side is running a different packet layout.
 .protocolVersion <- "fedps/2-block"
+
+.validateExchangeTimeouts <- function(timeout, initialTimeout) {
+    for (x in list(timeout, initialTimeout)) {
+        if (!is.numeric(x) || length(x) != 1L || is.na(x) || !is.finite(x) || x <= 0)
+            stop("Exchange and initial timeouts must be positive finite seconds")
+    }
+}
+
+.exchangeWaitSeconds <- function(coordinate, timeout, initialTimeout) {
+    if (coordinate %in% c(-3L, -1L)) initialTimeout else timeout
+}
 
 .blockSizeOf <- function(control) {
     size <- control$blockSize

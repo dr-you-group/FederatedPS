@@ -7,6 +7,7 @@ source(file.path(config$project, "windows", "progress.R"))
 options(FederatedPs.progress = fp_start_progress(out, role))
 progress <- function(stage, detail = "") utils::getFromNamespace(".fpsProgress", "FederatedPs")(stage, detail)
 source(file.path(config$project, "windows", "common.R"))
+source(file.path(config$project, "windows", "db-runtime.R"))
 progress("startup", "Checking offline runtime")
 fp_verify_runtime(config$project)
 fp_check_names(config$runId, config$sites)
@@ -23,7 +24,8 @@ options(andromedaTempFolder = scratch)
 pda_config <- pda::getCloudConfig(site_id = role, dir = config$exchange)
 if (role == "aggregator") {
     result <- FederatedPs::aggregatePs(pda_config, config$sites, config$runId,
-                                        timeout = config$exchangeTimeout)
+        timeout = config$exchangeTimeout,
+        initialTimeout = fp_timeout_value(config, "initialTimeout", 21600))
 } else if (config$mode %in% c("Database", "SyntheticCDM")) {
     result <- local({
         yuhs <- config$dataset == "YUHS"
@@ -36,9 +38,11 @@ if (role == "aggregator") {
             cat("TEST=true: loading invented local CDM tables; DB access is disabled in this path.\n")
             FederatedPs::getSyntheticYuhsStudyData(config$careSites[[role]], config$study, config$scenario)
         } else {
+            fp_configure_db_runtime(config, out)
             connection <- if (yuhs) fp_read_yuhs_connection(file.path(config$configDirectory, "yuhs.Renviron")) else
                 fp_read_connection(file.path(config$configDirectory, paste0(role, ".Renviron")))
-            FederatedPs::getDbStudyData(connectionDetails = connection,
+            connection <- fp_prepare_db_connection(connection, config)
+            fp_get_db_study_data(connectionDetails = connection,
                 cdmDatabaseSchema = Sys.getenv("CDM_DATABASE_SCHEMA"),
                 study = config$study, scenario = config$scenario,
                 careSiteId = if (yuhs) config$careSites[[role]] else NULL)
@@ -61,7 +65,8 @@ if (role == "aggregator") {
                     file.path(out, "synthetic-cdm-input.rds"))
         }
         fitted <- FederatedPs::fitPs(data, population, config = pda_config, runId = config$runId,
-            priorVariance = 1, control = fp_control(config), timeout = config$exchangeTimeout)
+            priorVariance = 1, control = fp_control(config), timeout = config$exchangeTimeout,
+            initialTimeout = fp_timeout_value(config, "initialTimeout", 21600))
         if (yuhs) {
             fitted <- fp_attach_person_ids(fitted, dplyr::collect(data$cohorts))
             attr(fitted, "metaData")$careSiteId <- config$careSites[[role]]
@@ -83,7 +88,8 @@ if (role == "aggregator") {
     }
     result <- FederatedPs::fitPsDesign(data$x, data$treatment, data$rowIds,
         config = pda_config, runId = config$runId, priorVariance = 1,
-        control = fp_control(config), timeout = config$exchangeTimeout)
+        control = fp_control(config), timeout = config$exchangeTimeout,
+        initialTimeout = fp_timeout_value(config, "initialTimeout", 21600))
 }
 progress("saving", "Writing role-local result.rds")
 saveRDS(result, file.path(out, "result.rds"))

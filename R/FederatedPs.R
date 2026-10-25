@@ -12,6 +12,8 @@
 #' @param control [Cyclops::createControl()] settings for Lange CPU CCD.
 #' @param startingCoefficients Common initial coefficients, intercept first.
 #' @param timeout Seconds to wait for each exchange.
+#' @param initialTimeout Seconds to wait during feature negotiation, including
+#'   database extraction at slower sites. Defaults to `timeout`.
 #' @return The input population with `propensityScore` and model coefficients
 #'   in its `metaData` attribute. Patient rows and PS remain at this hospital.
 #' @details Run `aggregatePs()` and one `fitPs()` call per hospital concurrently.
@@ -29,7 +31,8 @@ fitPs <- function(cohortMethodData, population = NULL, covariateIds = NULL,
                   priorVariance = 1,
                   control = Cyclops::createControl(convergenceType = "lange"),
                   startingCoefficients = rep(0, length(covariateIds) + 1L),
-                  timeout = 300) {
+                  timeout = 300, initialTimeout = timeout) {
+    .validateExchangeTimeouts(timeout, initialTimeout)
     if (!"aggregate" %in% names(formals(Cyclops::createControl))) {
         stop("Install the Cyclops fork pinned in DESCRIPTION")
     }
@@ -55,7 +58,8 @@ fitPs <- function(cohortMethodData, population = NULL, covariateIds = NULL,
         }
         .putPs(list(coordinate = coordinate, statistics = statistics),
                paste0(key, "_", config$site_id), roundConfig)
-        result <- .getPs(paste0(key, "_total"), roundConfig, timeout)
+        result <- .getPs(paste0(key, "_total"), roundConfig,
+                         .exchangeWaitSeconds(coordinate, timeout, initialTimeout))
         round <<- round + 1L
         result
     }

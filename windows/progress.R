@@ -3,6 +3,7 @@ fp_start_progress <- function(out, role, interval = 1) {
     path <- file.path(out, "progress.jsonl")
     last <- -Inf
     lastStage <- ""
+    lastDetail <- ""
     function(event) {
         now <- as.numeric(Sys.time())
         important <- event$kind != "progress" || !identical(event$stage, lastStage) ||
@@ -15,12 +16,16 @@ fp_start_progress <- function(out, role, interval = 1) {
         on.exit(close(con))
         writeLines(jsonlite::toJSON(event, auto_unbox = TRUE, na = "null", null = "null"), con)
         flush(con)
-        if (event$kind == "stage" && !identical(event$stage, lastStage)) {
+        if (event$kind == "stage" &&
+            (!identical(event$stage, lastStage) || !identical(event$detail, lastDetail))) {
             cat(sprintf("[%s] [%s] %s: %s\n", event$timestamp, role, event$stage, event$detail))
             flush(stdout())
         }
         last <<- now
-        if (event$kind != "wait") lastStage <<- event$stage
+        if (event$kind != "wait") {
+            lastStage <<- event$stage
+            lastDetail <<- event$detail
+        }
         invisible(NULL)
     }
 }

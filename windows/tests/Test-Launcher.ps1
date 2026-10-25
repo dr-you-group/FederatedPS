@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <# No R, database, Pester, or Internet needed. Run with Windows PowerShell 5.1. #>
 [CmdletBinding()]
-param()
+param([string]$Rscript = '')
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot '..\Common.ps1')
 function Assert-Throws([scriptblock]$Action, [string]$Pattern) {
@@ -31,6 +31,48 @@ $binaryName = if ($env:OS -ne 'Windows_NT') { 'pwsh' } elseif ($PSVersionTable.P
 $executable = Join-Path $PSHOME $binaryName
 $output = Join-Path $root 'received.txt'
 $value = 'path with spaces and "quotes" and trailing\'
+
+# The architecture executable must have the same PID as the R code. This test
+# is automatic on the pinned Windows install and optional on other hosts.
+if (-not $Rscript -and $env:OS -eq 'Windows_NT') {
+    $installedR = 'C:\Program Files\R\R-4.6.1\bin\x64\Rscript.exe'
+    if (Test-Path -LiteralPath $installedR -PathType Leaf) { $Rscript = $installedR }
+}
+if ($Rscript) {
+    $rChild = Join-Path $root 'direct worker with spaces.R'
+    @'
+args <- commandArgs(trailingOnly = TRUE)
+writeLines(c(as.character(Sys.getpid()), args[-1]), args[1])
+Sys.sleep(2)
+quit(save = "no", status = as.integer(args[3]))
+'@ | Set-Content -LiteralPath $rChild -Encoding UTF8
+    foreach($rCode in @(0,7)) {
+        $rWorkers = @()
+        $rOutput = Join-Path $root ("R identity $rCode.txt")
+        try {
+            $rWorkers += Start-FederatedRWorker -Runtime ([pscustomobject]@{Rscript=$Rscript}) `
+                -Script $rChild -Arguments @($rOutput,$value,[string]$rCode,'--flag-after-script') `
+                -WorkingDirectory $root -LogPrefix (Join-Path $root "R$rCode") -Role "R$rCode"
+            $deadline = [DateTime]::UtcNow.AddSeconds(20)
+            while (-not (Test-Path -LiteralPath $rOutput) -and [DateTime]::UtcNow -lt $deadline) {
+                if ($rWorkers[0].Process.HasExited) { break }
+                Start-Sleep -Milliseconds 50
+            }
+            if (-not (Test-Path -LiteralPath $rOutput)) { throw 'Direct R worker did not write its identity.' }
+            $received = [IO.File]::ReadAllLines($rOutput)
+            if ($received.Count -ne 4 -or [int]$received[0] -ne $rWorkers[0].Process.Id -or
+                $received[1] -cne $value -or $received[3] -cne '--flag-after-script') {
+                throw 'Direct R PID/argument test failed: an architecture wrapper may still be in use.'
+            }
+            if ($rCode -eq 0) { Wait-FederatedWorkers $rWorkers 20 }
+            else { Assert-Throws { Wait-FederatedWorkers $rWorkers 20 } 'failed.*exit 7' }
+        } finally { Stop-FederatedWorkers $rWorkers }
+        if ($rWorkers[0].FinalExitCode -ne $rCode) { throw 'Direct R final exit code was lost.' }
+    }
+    Write-Host 'PASS: direct R interpreter PID equals Sys.getpid(); quoted script arguments and exits 0/7 verified.'
+} else {
+    Write-Host 'SKIP: direct R identity test (no pinned Windows R found; pass -Rscript to test an interpreter).'
+}
 $workers = @()
 try {
     $workers += Start-FederatedWorker $executable @('-NoProfile','-File',$child,$output,$value) $root (Join-Path $root 'roundtrip') 'roundtrip'
@@ -91,6 +133,35 @@ try {
 } finally { Stop-FederatedWorkers $workers }
 foreach ($idValue in $ownedIds) {
     if (Get-Process -Id $idValue -ErrorAction SilentlyContinue) { throw 'An owned worker was not stopped after failure.' }
+}
+
+# A wrapper-like child must not survive cleanup of its retained parent. Only
+# this test's descendants are targeted; the main test process stays alive.
+if ($env:OS -eq 'Windows_NT') {
+$treeParent = Join-Path $root 'tree parent.ps1'
+@'
+param([string]$Executable, [string]$Heartbeat)
+$code = "`$until=[DateTime]::UtcNow.AddSeconds(20);while([DateTime]::UtcNow -lt `$until){[IO.File]::WriteAllText('" + $Heartbeat.Replace("'","''") + "',[DateTime]::UtcNow.Ticks.ToString());Start-Sleep -Milliseconds 100}"
+$encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($code))
+$descendant = Start-Process -FilePath $Executable -ArgumentList @('-NoProfile','-EncodedCommand',$encoded) -PassThru
+$descendant.WaitForExit()
+'@ | Set-Content -LiteralPath $treeParent -Encoding UTF8
+$heartbeat = Join-Path $root 'descendant heartbeat.txt'
+$workers = @()
+try {
+    $workers += Start-FederatedWorker $executable @('-NoProfile','-File',$treeParent,$executable,$heartbeat) $root (Join-Path $root 'tree') 'tree'
+    $deadline=[DateTime]::UtcNow.AddSeconds(20)
+    while(-not(Test-Path -LiteralPath $heartbeat) -and [DateTime]::UtcNow -lt $deadline){Start-Sleep -Milliseconds 50}
+    if(-not(Test-Path -LiteralPath $heartbeat)){throw 'Descendant did not start.'}
+} finally { Stop-FederatedWorkers $workers }
+Start-Sleep -Milliseconds 100
+$stoppedHeartbeat=[IO.File]::ReadAllText($heartbeat)
+Start-Sleep -Milliseconds 500
+if([IO.File]::ReadAllText($heartbeat) -cne $stoppedHeartbeat){throw 'Owned descendant continued running after cleanup.'}
+if($null -eq $workers[0].FinalExitCode){throw 'Terminated worker final exit code was not retained.'}
+Write-Host 'PASS: Windows owned-process-tree cleanup stops a wrapper descendant.'
+} else {
+    Write-Host 'SKIP: Windows taskkill /T process-tree regression (requires Windows).'
 }
 $workers = @()
 try {

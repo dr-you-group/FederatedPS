@@ -13,6 +13,9 @@ param(
     [ValidateRange(0.000001,1.0)][double]$Alpha = 1.0,
     [ValidateRange(0.000000000001,0.01)][double]$Tolerance = 0.000001,
     [ValidateRange(1,2147483647)][int]$ExchangeTimeoutSeconds = 3600,
+    [ValidateRange(1,2147483647)][int]$InitialTimeoutSeconds = 21600,
+    [ValidateRange(1,86400)][int]$SmallQueryTimeoutSeconds = 60,
+    [ValidateRange(1,2147483647)][int]$DbQueryTimeoutSeconds = 7200,
     [ValidateRange(1,2147483647)][int]$RunTimeoutSeconds = 86400,
     [string]$ConfigDirectory = '', [string]$DesignDirectory = '',
     [string]$WorkDirectory = '', [string]$ExchangeDirectory = '',
@@ -87,6 +90,8 @@ $config = [ordered]@{
     careSites = $(if ($Dataset -eq 'YUHS') { $careSites } else { $null })
     study = $Study; scenario = $Scenario; blockSize = $BlockSize; alpha = $Alpha
     tolerance = $Tolerance; exchangeTimeout = $ExchangeTimeoutSeconds
+    initialTimeout = $InitialTimeoutSeconds; smallQueryTimeout = $SmallQueryTimeoutSeconds
+    dbQueryTimeout = $DbQueryTimeoutSeconds; runTimeout = $RunTimeoutSeconds
     output = $output; exchange = $exchange
     configDirectory = [IO.Path]::GetFullPath($ConfigDirectory)
     designDirectory = $(if ($DesignDirectory) { [IO.Path]::GetFullPath($DesignDirectory) } else { '' })
@@ -112,7 +117,7 @@ try {
         foreach ($role in (@('aggregator') + $Sites)) {
             $roleOutput = Join-Path $output $role
             New-Item -ItemType Directory -Path $roleOutput | Out-Null
-            $workers += Start-FederatedWorker -Executable $runtime.Rscript -Arguments @('--vanilla', (Join-Path $PSScriptRoot 'run-role.R'), $configFile, $role) `
+            $workers += Start-FederatedRWorker -Runtime $runtime -Script (Join-Path $PSScriptRoot 'run-role.R') -Arguments @($configFile, $role) `
                 -WorkingDirectory $project -LogPrefix (Join-Path $roleOutput 'run') -Role $role
         }
     } finally {
@@ -120,11 +125,12 @@ try {
     }
     Write-FederatedProcessMetadata $output $workers
     Write-Host "Run $RunId started. Live logs and status below. Files: $output"
+    Write-Host "Timeouts (seconds): initial/feature negotiation=$InitialTimeoutSeconds; exchange=$ExchangeTimeoutSeconds; small DB query=$SmallQueryTimeoutSeconds; bulk DB statement=$DbQueryTimeoutSeconds; whole run=$RunTimeoutSeconds"
     Wait-FederatedWorkers $workers $RunTimeoutSeconds $monitor
     Write-FederatedMonitorLine $monitor 'All model roles exited successfully. Starting final result verification.'
     $verification = Join-Path $output 'verification'
     New-Item -ItemType Directory -Path $verification | Out-Null
-    $workers += Start-FederatedWorker -Executable $runtime.Rscript -Arguments @('--vanilla', (Join-Path $PSScriptRoot 'verify-results.R'), $configFile) `
+    $workers += Start-FederatedRWorker -Runtime $runtime -Script (Join-Path $PSScriptRoot 'verify-results.R') -Arguments @($configFile) `
         -WorkingDirectory $project -LogPrefix (Join-Path $verification 'run') -Role 'verification'
     Write-FederatedProcessMetadata $output $workers
     $remaining = [Math]::Max(1, $RunTimeoutSeconds - [int]([DateTime]::UtcNow-$runStarted).TotalSeconds)
@@ -133,10 +139,18 @@ try {
     Write-FederatedMonitorLine $monitor "PASS: all roles and final verification completed. Results: $output"
     [IO.File]::WriteAllText((Join-Path $output 'run-status.json'), '{"state":"success"}')
 } catch {
+    $runFailure=$_
     [IO.File]::WriteAllText((Join-Path $output 'run-status.json'), '{"state":"failed"}')
-    throw
+    # Capture the original live workers before cleanup; no SQL admin permission
+    # or heap/patient-data dump is involved. Each JVM attach is time-bounded.
+    $collector=Join-Path $PSScriptRoot 'Collect-RunDiagnostics.ps1'
+    if ($Mode -eq 'Database' -and (Test-Path -LiteralPath $collector)) {
+        try { & $collector -RunDirectory $output -JavaHome $env:JAVA_HOME }
+        catch { Write-Warning "Diagnostic collection failed: $($_.Exception.Message). Original analysis error follows." }
+    }
+    throw $runFailure
 } finally {
     Stop-FederatedWorkers $workers
-    Update-FederatedMonitor $monitor -Force -Final
+    Update-FederatedMonitor $monitor $workers -Force -Final
     Complete-FederatedMonitor $monitor
 }

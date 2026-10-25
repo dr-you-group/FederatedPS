@@ -58,17 +58,50 @@
 .getCareSiteStudyData <- function(connection, schema, settings, careSiteId) {
     careSiteId <- .validateCareSiteId(careSiteId)
     .validateCdmSchema(schema)
-    query <- function(sql) DatabaseConnector::querySql(connection, sql, snakeCaseToCamelCase = TRUE)
-    run <- function(sql) DatabaseConnector::executeSql(connection, sql, progressBar = FALSE)
+    currentStep <- 0
+    currentDetail <- "Preparing extraction"
+    step <- function(done, detail) {
+        currentStep <<- done
+        currentDetail <<- detail
+        .fpsProgress("extract", detail, done, 10, "extraction steps (not time)")
+    }
+    query <- function(sql, label = currentDetail, smallColumns = NULL) {
+        .fpsDbOperation(paste(label, "query and fetch"), {
+            if (is.null(smallColumns)) DatabaseConnector::querySql(connection, sql, snakeCaseToCamelCase = TRUE)
+            else .fpsSmallSqlQuery(connection, sql, smallColumns)
+        }, sql = sql, completed = currentStep)
+    }
+    run <- function(sql, label = currentDetail) {
+        # Preserve executeSql's original batching/transaction behavior. In
+        # particular, do not create a new commit boundary for every statement.
+        .fpsDbOperation(paste(label, "SQL execution"),
+            DatabaseConnector::executeSql(connection, sql, progressBar = FALSE),
+            sql = sql, completed = currentStep)
+    }
     execute <- function(file, ...) {
         path <- system.file("sql", "sql_server", file, package = "FederatedPs")
         if (!nzchar(path)) stop("Missing SQL Server templates; reinstall FederatedPs")
         sql <- paste(readLines(path, warn = FALSE), collapse = "\n")
-        run(SqlRender::render(sql, cdm_database_schema = schema, care_site_id = careSiteId, ...))
+        sql <- .fpsDbOperation(paste("Rendering", file),
+            SqlRender::render(sql, cdm_database_schema = schema, care_site_id = careSiteId, ...),
+            completed = currentStep)
+        run(sql, file)
     }
-    step <- function(done, detail) .fpsProgress("extract", detail, done, 10, "extraction steps (not time)")
+    if (!is.null(getOption("FederatedPs.smallQueryTimeoutSeconds"))) {
+        step(0, "Connection self-check (SELECT 1 and session ID)")
+        check <- query("SELECT CAST(1 AS INT) AS ok, @@SPID AS session_id",
+            smallColumns = c(ok = "integer", sessionId = "integer"))
+        if (nrow(check) != 1L || is.na(check$ok[1]) || check$ok[1] != 1L ||
+            is.na(check$sessionId[1])) stop("Unexpected SQL Server self-check result")
+        .fpsDiagnosticWrite("connection.tsv", paste(
+            format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"),
+            Sys.getpid(), check$sessionId[1], sep = "\t"), append = TRUE)
+        .fpsProgress("connected", paste("SQL Server self-check passed; SPID", check$sessionId[1],
+                                        "; R PID", Sys.getpid()))
+    }
     step(0, "CARE_SITE lookup")
-    institution <- query(sprintf("SELECT care_site_id, care_site_name, care_site_source_value FROM %s.CARE_SITE WHERE care_site_id = %d", schema, careSiteId))
+    institution <- query(sprintf("SELECT care_site_id, care_site_name, care_site_source_value FROM %s.CARE_SITE WHERE care_site_id = %d", schema, careSiteId),
+        smallColumns = c(careSiteId = "integer", careSiteName = "character", careSiteSourceValue = "character"))
     if (nrow(institution) != 1L) stop("Expected one CARE_SITE row for careSiteId ", careSiteId)
     step(1, "SitePartition.sql: assigning exclusive patients and visits")
     execute("SitePartition.sql")
@@ -134,20 +167,26 @@
             prior_days = settings$priorObservationDays, indication_days = settings$indicationDays,
             washout_days = settings$washoutDays)
     } else execute("DefaultStudy.sql")
-    step(6, "Building and fetching CohortMethod cohorts")
-    sql <- SqlRender::loadRenderTranslateSql("CreateOrCountCohorts.sql", packageName = "CohortMethod",
+    step(6, "CohortMethod: preparing cohort SQL")
+    sql <- .fpsDbOperation("CohortMethod: rendering CreateOrCountCohorts.sql",
+        SqlRender::loadRenderTranslateSql("CreateOrCountCohorts.sql", packageName = "CohortMethod",
         dbms = "sql server", cdm_database_schema = schema,
         exposure_database_schema = "tempdb.dbo", exposure_table = "#fps_exposure",
         target_id = 1, comparator_id = 2, first_only = TRUE,
         remove_duplicate_subjects = "keep first, truncate to second",
         washout_period = settings$priorObservationDays, min_age = if (specific) "" else settings$minAge,
-        restrict_to_common_period = FALSE, action = "CREATE")
+        restrict_to_common_period = FALSE, action = "CREATE"), completed = currentStep)
     # YUHS table names are uppercase (also works on case-insensitive databases).
-    for (table in c("person", "observation_period"))
-        sql <- gsub(paste0(schema, ".", table), paste0(schema, ".", toupper(table)), sql, fixed = TRUE)
-    run(sql)
-    cohorts <- query(SqlRender::loadRenderTranslateSql("GetCohorts.sql", packageName = "CohortMethod",
-        dbms = "sql server", target_id = 1, cohortTable = "#cohort_person"))
+    sql <- .fpsUppercaseCohortTables(sql, schema)
+    step(6, "CohortMethod: executing cohort creation SQL")
+    run(sql, "CohortMethod CreateOrCountCohorts.sql")
+    step(6, "CohortMethod: preparing cohort fetch SQL")
+    fetchSql <- .fpsDbOperation("CohortMethod: rendering GetCohorts.sql",
+        SqlRender::loadRenderTranslateSql("GetCohorts.sql", packageName = "CohortMethod",
+            dbms = "sql server", target_id = 1, cohortTable = "#cohort_person"), completed = currentStep)
+    step(6, "CohortMethod: fetching cohort rows into R")
+    cohorts <- query(fetchSql, "CohortMethod GetCohorts.sql")
+    step(6, "CohortMethod: validating cohort rows in R")
     cohorts$rowId <- as.numeric(cohorts$rowId)
     if (anyNA(cohorts$rowId) || anyDuplicated(cohorts$rowId) || anyDuplicated(cohorts$personId))
         stop("Expected one row per person; inspect native observation periods")
@@ -160,16 +199,22 @@
     complete <- FALSE
     on.exit(if (!complete) Andromeda::close(data), add = TRUE)
     step(8, "Transferring covariates to local Andromeda")
-    DatabaseConnector::querySqlToAndromeda(connection, "SELECT row_id, covariate_id, covariate_value FROM #fps_covariates",
-        andromeda = data, andromedaTableName = "covariates", snakeCaseToCamelCase = TRUE)
+    transferSql <- "SELECT row_id, covariate_id, covariate_value FROM #fps_covariates"
+    .fpsDbOperation("Transferring covariates into Andromeda",
+        DatabaseConnector::querySqlToAndromeda(connection, transferSql,
+            andromeda = data, andromedaTableName = "covariates", snakeCaseToCamelCase = TRUE),
+        sql = transferSql, completed = currentStep)
     step(9, "Transferring feature metadata")
-    DatabaseConnector::querySqlToAndromeda(connection, sprintf("SELECT DISTINCT f.covariate_id,
+    metadataSql <- sprintf("SELECT DISTINCT f.covariate_id,
         f.covariate_id %% 1000 AS analysis_id,
         CASE WHEN f.covariate_id %% 1000 = 2 THEN 0 ELSE f.covariate_id / 1000 END AS concept_id,
         CASE WHEN f.covariate_id %% 1000 = 2 THEN CONCAT('Age group ', CAST(f.covariate_id / 1000 * 5 AS VARCHAR(20)))
              ELSE COALESCE(c.concept_name, 'Unknown concept') END AS covariate_name
-        FROM #fps_covariates f LEFT JOIN %s.CONCEPT c ON c.concept_id = f.covariate_id / 1000", schema),
-        andromeda = data, andromedaTableName = "covariateRef", snakeCaseToCamelCase = TRUE)
+        FROM #fps_covariates f LEFT JOIN %s.CONCEPT c ON c.concept_id = f.covariate_id / 1000", schema)
+    .fpsDbOperation("Transferring feature metadata into Andromeda",
+        DatabaseConnector::querySqlToAndromeda(connection, metadataSql,
+            andromeda = data, andromedaTableName = "covariateRef", snakeCaseToCamelCase = TRUE),
+        sql = metadataSql, completed = currentStep)
     data$analysisRef <- .careSiteAnalysis(settings)
     data$cohorts <- cohorts
     data$outcomes <- data.frame(rowId = numeric(), outcomeId = numeric(), daysToEvent = numeric())

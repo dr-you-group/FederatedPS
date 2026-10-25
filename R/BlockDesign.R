@@ -10,14 +10,15 @@
 #' @param rowIds Unique row identifiers aligned with the rows of `x`.
 #' @param covariateIds Common feature identifiers. `NULL` negotiates the sorted
 #'   union with the other hospitals.
-#' @param config,runId,priorVariance,control,startingCoefficients,timeout As [fitPs()].
+#' @param config,runId,priorVariance,control,startingCoefficients,timeout,initialTimeout As [fitPs()].
 #' @return A list with the common coefficients, the local propensity scores and
 #'   per-round exchange counts.
 #' @export
 fitPsDesign <- function(x, treatment, rowIds, covariateIds = NULL, config, runId,
                         priorVariance = 1,
                         control = Cyclops::createControl(convergenceType = "lange"),
-                        startingCoefficients = NULL, timeout = 300) {
+                        startingCoefficients = NULL, timeout = 300, initialTimeout = timeout) {
+    .validateExchangeTimeouts(timeout, initialTimeout)
     if (length(dim(x)) != 2L || nrow(x) != length(rowIds) ||
         nrow(x) != length(treatment) || nrow(x) == 0L || ncol(x) == 0L) {
         stop("x, treatment and rowIds must describe the same nonempty rows")
@@ -55,7 +56,8 @@ fitPsDesign <- function(x, treatment, rowIds, covariateIds = NULL, config, runId
         }
         .putPs(list(coordinate = coordinate, statistics = statistics),
                paste0(key, "_", config$site_id), roundConfig)
-        result <- .getPs(paste0(key, "_total"), roundConfig, timeout)
+        result <- .getPs(paste0(key, "_total"), roundConfig,
+                         .exchangeWaitSeconds(coordinate, timeout, initialTimeout))
         round <<- round + 1L
         result
     }

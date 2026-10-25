@@ -5,6 +5,11 @@ function ConvertTo-FederatedUtc($Value) {
     if ($Value -is [DateTime]) { return $Value.ToUniversalTime() }
     ([DateTimeOffset]::Parse([string]$Value, [Globalization.CultureInfo]::InvariantCulture)).UtcDateTime
 }
+function Get-FederatedElapsedSeconds([DateTime]$Now, [DateTime]$Since) {
+    # An event can be written while this refresh reads earlier roles. Never
+    # display negative ages if clocks move or a just-written timestamp is ahead.
+    [Math]::Max(0, [Math]::Floor(($Now-$Since).TotalSeconds))
+}
 function New-FederatedLogCursor([string]$Path, [bool]$Tail = $false) {
     [pscustomobject]@{ Path=$Path; Offset=[long]0; Pending=''; Decoder=[Text.Encoding]::UTF8.GetDecoder(); Tail=$Tail }
 }
@@ -49,7 +54,8 @@ function New-FederatedMonitor {
             Stdout=(New-FederatedLogCursor (Join-Path $dir 'run.stdout.log') $ReadOnly.IsPresent);
             Stderr=(New-FederatedLogCursor (Join-Path $dir 'run.stderr.log') $ReadOnly.IsPresent);
             Events=(New-FederatedLogCursor (Join-Path $dir 'progress.jsonl') $ReadOnly.IsPresent);
-            LastCpu=$null; LastCpuAt=$null; Cpu='?'; ProcessState='unknown'; LastText='' }
+            LastCpu=$null; LastCpuAt=$null; LastProcessId=$null; Cpu='?';
+            ProcessState='not observed'; ObservedExitCode=$null; LastText='' }
     }
     [pscustomobject]@{ Root=$RunDirectory; States=$states; Started=[DateTime]::UtcNow;
         LastRefresh=[DateTime]::MinValue; LastStatus=[DateTime]::MinValue;
@@ -116,35 +122,68 @@ function Update-FederatedMonitor {
                     }
                 }
             }
-            foreach($line in @(Read-FederatedAppend $s.Events)) {
+            foreach($line in @(Read-FederatedAppend $s.Events -Final:$Final)) {
                 try { $event=$line | ConvertFrom-Json -ErrorAction Stop } catch { continue }
                 if (-not $event.PSObject.Properties['kind'] -or -not $event.PSObject.Properties['stage']) { continue }
                 $s.LastEvent=ConvertTo-FederatedUtc $event.timestamp
                 if ($event.kind -eq 'wait') { $s.LastText=$event.detail; continue }
-                if ($null -eq $s.Event -or $s.Event.stage -ne $event.stage) { $s.StageSince=$s.LastEvent }
+                # All SQL extraction steps use stage=extract. The detail and
+                # completed fields distinguish CARE_SITE from the cohort query.
+                if ($null -eq $s.Event -or $s.Event.stage -ne $event.stage -or
+                    $s.Event.detail -ne $event.detail -or $s.Event.completed -ne $event.completed) {
+                    $s.StageSince=$s.LastEvent
+                }
                 $s.Event=$event; $s.LastText=''
             }
+            $now=[DateTime]::UtcNow
             $worker=@($Workers | Where-Object { $_.Role -eq $s.Role })
             $process=$null
-            $s.ProcessState='not observed (not started/exited/legacy)'
+            $s.Cpu='?'
+            if ($null -ne $s.ObservedExitCode) { $s.ProcessState="exited($($s.ObservedExitCode))" }
+            elseif ($s.Role -eq 'verification' -and $null -eq $s.Event -and $null -eq $s.LastProcessId) {
+                $s.ProcessState=if($Final){'not started'}else{'not started (awaiting model roles)'}
+            } elseif ($Final) { $s.ProcessState='not observed after cleanup' }
+            else { $s.ProcessState='not observed (not started/exited/legacy)' }
             if ($worker.Count -and $worker[0].PSObject.Properties['Process']) { $process=$worker[0].Process }
-            if ($null -ne $process) {
+            $finalExit=$null
+            if ($worker.Count -and $worker[0].PSObject.Properties['FinalExitCode']) {
+                $finalExit=$worker[0].FinalExitCode
+            }
+            if ($null -ne $finalExit) {
+                $s.ObservedExitCode=$finalExit
+                $s.ProcessState="exited($finalExit)"
+                $s.LastCpuAt=$null
+            } elseif ($null -ne $process) {
                 try {
                     $process.Refresh()
-                    if ($process.HasExited) { $s.ProcessState="exited($($process.ExitCode))"; $finished++ }
+                    $runtimePid=$null
+                    if ($null -ne $s.Event -and $s.Event.PSObject.Properties['pid']) { $runtimePid=$s.Event.pid }
+                    # Older Rscript.exe launchers own a wrapper, not the Rterm
+                    # that writes progress. Never label wrapper CPU as R CPU.
+                    if ($null -ne $runtimePid -and $runtimePid -ne $process.Id) {
+                        $s.ProcessState="runtime PID=$runtimePid not verified (launcher PID=$($process.Id))"
+                        $s.LastCpuAt=$null
+                    } elseif ($process.HasExited) {
+                        $s.ObservedExitCode=$process.ExitCode
+                        $s.ProcessState="exited($($process.ExitCode))"
+                        $s.LastCpuAt=$null
+                    }
                     else {
+                        if ($s.LastProcessId -ne $process.Id) { $s.LastCpuAt=$null }
+                        $s.LastProcessId=$process.Id
                         $s.ProcessState="alive PID=$($process.Id)"
                         $cpuTime=$process.TotalProcessorTime
                         if ($null -ne $cpuTime) {
                             $cpu=$cpuTime.TotalSeconds
                             if ($null -ne $s.LastCpuAt -and ($now-$s.LastCpuAt).TotalSeconds -gt 0) {
-                                $s.Cpu=('{0:F1}%' -f (100*($cpu-$s.LastCpu)/($now-$s.LastCpuAt).TotalSeconds))
+                                $s.Cpu=('{0:F1}%' -f ([Math]::Max(0,100*($cpu-$s.LastCpu)/($now-$s.LastCpuAt).TotalSeconds)))
                             }
                             $s.LastCpu=$cpu; $s.LastCpuAt=$now
                         }
                     }
-                } catch { $s.ProcessState='process unavailable' }
-            }
+                } catch { $s.ProcessState='process unavailable'; $s.LastCpuAt=$null }
+            } else { $s.LastCpuAt=$null }
+            if ($s.ProcessState.StartsWith('exited(')) { $finished++ }
             $logAt=$null
             foreach($c in @($s.Stdout,$s.Stderr)) {
                 if ([IO.File]::Exists($c.Path)) {
@@ -152,12 +191,13 @@ function Update-FederatedMonitor {
                     if ($null -eq $logAt -or $at -gt $logAt) { $logAt=$at }
                 }
             }
-            $logAge=if($null -eq $logAt){'?'}else{[string][int]($now-$logAt).TotalSeconds+'s'}
-            $eventAge=if($null -eq $s.LastEvent){'?'}else{[string][int]($now-$s.LastEvent).TotalSeconds+'s'}
+            $now=[DateTime]::UtcNow
+            $logAge=if($null -eq $logAt){'?'}else{[string](Get-FederatedElapsedSeconds $now $logAt)+'s'}
+            $eventAge=if($null -eq $s.LastEvent){'?'}else{[string](Get-FederatedElapsedSeconds $now $s.LastEvent)+'s'}
             $allowEta=($null -ne $s.LastEvent -and ($now-$s.LastEvent).TotalSeconds -lt 10 -and
                 -not $s.LastText -and $s.ProcessState.StartsWith('alive'))
             $view=Get-FederatedProgressDisplay $s.Event $allowEta
-            $line="[$($s.Role)] $($s.ProcessState); CPU(core)=$($s.Cpu); last log=${logAge}; last event=${eventAge}; stage elapsed=$([int]($now-$s.StageSince).TotalSeconds)s | $($view.Text)"
+            $line="[$($s.Role)] $($s.ProcessState); CPU(core)=$($s.Cpu); last log=${logAge}; last event=${eventAge}; step elapsed=$(Get-FederatedElapsedSeconds $now $s.StageSince)s | $($view.Text)"
             if ($s.LastText) { $line += " | $($s.LastText)" }
             if ($statusDue) { Write-FederatedMonitorLine $Monitor $line }
             if (-not $Monitor.NoProgress) {
@@ -166,13 +206,14 @@ function Update-FederatedMonitor {
                     -PercentComplete $view.Percent -SecondsRemaining $view.Eta
             }
         }
+        $now=[DateTime]::UtcNow
         if ($statusDue) {
-            Write-FederatedMonitorLine $Monitor "Elapsed=$([int]($now-$Monitor.Started).TotalSeconds)s; overall ETA unknown. Alive/CPU/log age do not prove SQL is advancing."
+            Write-FederatedMonitorLine $Monitor "Elapsed=$(Get-FederatedElapsedSeconds $now $Monitor.Started)s; overall ETA unknown. Alive/CPU/log age do not prove SQL is advancing."
             $Monitor.LastStatus=$now
         }
         if (-not $Monitor.NoProgress) {
             Write-Progress -Id 100 -Activity 'FederatedPS - overall duration unknown' `
-                -Status "$finished/$($Monitor.States.Count) processes exited; elapsed=$([int]($now-$Monitor.Started).TotalSeconds)s" `
+                -Status "$finished/$($Monitor.States.Count) processes exited; elapsed=$(Get-FederatedElapsedSeconds $now $Monitor.Started)s" `
                 -PercentComplete -1 -SecondsRemaining -1
         }
     } catch {

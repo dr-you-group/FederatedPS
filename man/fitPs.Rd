@@ -14,7 +14,8 @@ fitPs(
   priorVariance = 1,
   control = Cyclops::createControl(convergenceType = "lange"),
   startingCoefficients = rep(0, length(covariateIds) + 1L),
-  timeout = 300
+  timeout = 300,
+  initialTimeout = timeout
 )
 }
 \arguments{
@@ -39,6 +40,8 @@ sorted union of feature IDs reported by the hospitals.}
 \item{startingCoefficients}{Common initial coefficients, intercept first.}
 
 \item{timeout}{Seconds to wait for each exchange.}
+
+\item{initialTimeout}{Seconds to wait during feature negotiation, including database extraction at slower sites. Defaults to \code{timeout}.}
 }
 \value{
 The input population with \code{propensityScore} and model coefficients

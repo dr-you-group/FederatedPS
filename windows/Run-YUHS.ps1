@@ -12,6 +12,9 @@ param(
     [string]$RHome = 'C:\Program Files\R\R-4.6.1', [string]$JavaHome = '',
     [string]$ConfigDirectory = '', [string]$WorkDirectory = '', [string]$ExchangeDirectory = '',
     [ValidateRange(1,2147483647)][int]$ExchangeTimeoutSeconds = 3600,
+    [ValidateRange(1,2147483647)][int]$InitialTimeoutSeconds = 21600,
+    [ValidateRange(1,86400)][int]$SmallQueryTimeoutSeconds = 60,
+    [ValidateRange(1,2147483647)][int]$DbQueryTimeoutSeconds = 7200,
     [ValidateRange(1,2147483647)][int]$RunTimeoutSeconds = 86400
 )
 $ErrorActionPreference = 'Stop'

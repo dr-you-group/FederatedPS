@@ -1,3 +1,62 @@
+## 0.0.7: Windows 프로세스와 DB 지연 진단 수정
+
+Windows의 `bin/Rscript.exe` 대신 실제 인터프리터 `bin/x64/Rscript.exe`를 직접
+실행합니다. 역할별 PID/CPU/종료 코드를 같은 프로세스에서 읽고, 실패/중단 시 이
+실행기가 시작한 프로세스 트리를 정리합니다. 이전 버전에서 남은 프로세스는
+`Stop-FederatedRun.ps1 -RunDirectory <실행폴더>`로 해당 실행만 정리할 수 있습니다.
+RStudio를 열어 둔 경우에도 패키지 업데이트가 차단되며, 이제 PID/이름을 표시합니다.
+
+`InitialTimeoutSeconds` 기본 21600초는 초기 feature 교환의 각 대기 제한입니다.
+데이터 준비가 느린 다른 기관을 기다리는 시간과 학습 중 교환 제한
+`ExchangeTimeoutSeconds` 기본 3600초를 분리했습니다. 전체 실행 제한은
+`RunTimeoutSeconds` 기본 86400초이며, 실제 적용 값은 시작 화면과 run.json에 남습니다.
+실행 중인 run.json을 수정해도 이미 시작한 R 프로세스 설정은 바뀌지 않습니다.
+
+DB 연결 후 SELECT 1/@@SPID와 CARE_SITE를 먼저 검사합니다. 작은 조회는 기본
+60초 query timeout과 일시적인 75초 network timeout으로 제한하고, 원래 network
+timeout을 복원한 다음 대량 추출을 시작합니다. 작은 초기 조회의 JDBC 오류만
+새 연결로 한 번 재시도합니다. 임시 테이블 생성 이후의 SQL/데이터 검증/학습은
+자동 재실행하지 않습니다. 초기 DB 연결은 loginTimeout=30, 취소 응답은
+cancelQueryTimeout=10, 대량 SQL은 DbQueryTimeoutSeconds 기본 7200초입니다.
+시간 제한은 정상 속도나 예상 완료 시간을 보장하는 값이 아닙니다.
+
+코호트 6/10을 SQL 준비/생성 실행/결과 수신/R 검증으로 나눕니다. 역할 폴더의
+sql-diagnostics에는 operations.tsv, connection.tsv(SPID), 실행한 SQL과 오류 보고가
+남습니다. 단계 시작/완료/실패와 소요 시간을 기록하며, 실제 SQL 내부의 행 처리율이나
+전체 ETA는 제공하지 않습니다. 현재 단계 경과 시간을 세부 단계가 바뀔 때 초기화합니다.
+
+기본 preset 노출 임시 테이블에 비고유 인덱스를 추가하고, 대소문자 구분 DB에서
+CohortMethod의 PERSON 별칭을 유지합니다. 대상자/치료군/공변량 기준은 변경하지 않습니다.
+성능 개선 폭은 실제 DB에서 확인해야 합니다. 이 수정만으로 미확인 DB 잠금/프록시/
+네트워크 지연이 모두 해결됐다고 간주하면 안 됩니다.
+
+관리자 DB 권한 없는 연결 점검:
+
+```powershell
+.\windows\Test-YUHS-Connection.ps1
+```
+
+같은 common.R과 yuhs.Renviron을 읽는 새 R/JDBC 연결에서 SELECT 1과 세 기관의
+CARE_SITE만 조회합니다. 환자 추출은 하지 않습니다. 새 연결의 성공은 기존 다른
+세션이나 전체 코호트 SQL의 성공까지 보장하지 않습니다.
+
+진단 자료 수집(실행 중에도 가능):
+
+```powershell
+.\windows\Collect-RunDiagnostics.ps1 -RunDirectory '<실행폴더>'
+```
+
+DB 모드 실패 시에도 종료 전에 이 수집을 시도합니다. 로컬 JVM thread stack과
+프로세스 메타데이터, 허용된 로그/SQL만 ZIP에 넣습니다. RDS, Andromeda, 환자별
+결과, yuhs.Renviron, Java heap은 포함하지 않습니다. jcmd는 역할당 최대 15초 기다리며
+사용할 수 없으면 이유를 기록합니다. 분석 종료/재시작이나 서버 권한 변경은 하지 않습니다.
+
+기존 common.R의 SSL 설정은 업데이트 패치에서 보존합니다. 설치된 0.0.6 사용자는
+R/RStudio와 이전 실행을 종료한 후 pure-R 패키지만 업데이트합니다. Cyclops/JDBC/
+R/Rtools/Java/RStudio를 다시 설치할 필요는 없습니다. 0.0.7 검증은 Linux에서
+프로세스/로그/정책/모의 JDBC/데이터 검사를 수행했으며, 대상 Windows와 실제 YUHS
+접속·전체 수치 실행의 최종 확인은 현장 환경에서 필요합니다.
+
 # Windows Server 폐쇄망 실행
 
 대상은 기존 번들의 10~13 단계를 완료한 **Windows Server 2022 x64 / R 4.6.1 /
@@ -13,7 +72,7 @@ Windows의 기본 데이터 구성은 **YUHS SQL Server CDM을 세 기관으로 
 기존 번들의 `1c265564...`와 **표시 버전은 모두 3.7.1**이지만, 이전 빌드에는
 `blockSize`와 `alpha`가 없습니다. FederatedPs 소스만 바꿔서는 블록 CCD를 실행할 수 없습니다.
 
-이 설치 절차는 새 Cyclops와 FederatedPs 0.0.5를
+이 설치 절차는 새 Cyclops와 FederatedPs 0.0.7을
 `C:\FederatedPS\RLibrary\windows-block`에 설치합니다. 기존
 `C:\FederatedPS\RLibrary\4.6`은 의존성 라이브러리로 계속 사용합니다.
 이 폴더 구조는 프로젝트 소스 경로와 별개입니다. 아래 예제에서는 소스를
@@ -57,7 +116,7 @@ Cyclops C++ 소스를 Rtools45로 빌드하므로 시간이 걸립니다. `R CMD
 모두 통과해야 완료 메시지가 나옵니다. `blockSize`뿐 아니라 Cyclops 커밋, 라이브러리
 경로, FederatedPs 버전/프로토콜, JVM 및 SQL Server JDBC를 확인합니다. SQL Server JAR는 기존 JDBC 폴더 아래
 `sqlserver`에 따로 설치하며 PostgreSQL 드라이버를 바꾸지 않습니다.
-이전 Windows 브랜치를 설치한 경우에도 새 소스와 JDBC payload를 반입하여 재설치하십시오.
+초기 Windows 설치에는 소스와 JDBC payload가 필요합니다. 이미 0.0.6 런타임을 설치한 경우에는 위 0.0.7 안내대로 FederatedPs만 업데이트하십시오.
 
 설치 위치가 다르면 `-InstallRoot`, `-RHome`, `-JavaHome`, `-RtoolsHome`을 지정합니다.
 이후 실행에도 동일한 `-InstallRoot`, `-RHome`, `-JavaHome`을 사용합니다.
@@ -139,9 +198,9 @@ notepad .\windows\config\yuhs.Renviron
 설정합니다. 비밀번호는 R `.Renviron`의 따옴표/이스케이프 규칙을 따릅니다. 이 파일은 Git에서
 제외되며, 해당 Windows 계정에만 필요한 NTFS 접근 권한을 부여합니다.
 
-JDBC는 `encrypt=true;trustServerCertificate=false`로 연결합니다. 서버 인증서의 DNS 이름과
-일치하는 `DB_SERVER`를 사용하고 기관 CA를 Temurin 신뢰 저장소에 등록하십시오.
-인증서 오류는 검증을 끄지 않고 CA/이름 설정으로 해결합니다. 현재 실행기는 SQL 로그인을
+배포 원본 common.R의 JDBC 기본값은 `encrypt=true;trustServerCertificate=false`입니다.
+이번 작은 업데이트 패치는 로컬에서 정한 SSL 설정(encrypt=false 포함)을 보존합니다.
+암호화를 사용하는 경우에는 서버 인증서 이름과 기관 CA 설정을 맞춥니다. 현재 실행기는 SQL 로그인을
 지원합니다. Windows 통합 인증은 별도 인증 DLL/설정이 필요하므로 이 경로에 포함하지 않습니다.
 
 ```powershell
@@ -235,7 +294,8 @@ PERSON_ID 중복도 확인합니다. 공유 exchange에는 환자 ID를 쓰지 �
 실행합니다. 하나가 실패하거나 전체 제한 시간을 넘으면 **이 명령이 시작한 프로세스만**
 종료하고 로그를 보존합니다. 다른 R/RStudio 작업은 종료하지 않습니다.
 
-추출이 오래 걸리면 `-ExchangeTimeoutSeconds`(기본 3600초)를 늘립니다.
+추출이 오래 걸려 초기 교환 대기를 늘려야 하면 `-InitialTimeoutSeconds`(기본 21600초)를 조정합니다.
+`-ExchangeTimeoutSeconds`(기본 3600초)는 학습 중 교환 대기 제한입니다.
 `-RunTimeoutSeconds`는 전체 실행 시간 제한(기본 86400초)입니다. `-WorkDirectory`,
 `-ExchangeDirectory`, `-ConfigDirectory`로 경로를 바꿀 수 있습니다. 서버 메모리는
 실제 코호트 크기에 따라 확인해야 하며, 각 R 프로세스의 계산 스레드는 1개로 제한합니다.
@@ -287,7 +347,7 @@ Set-Location -LiteralPath 'C:\FederatedPS_YUHS_Offline'
 
 RStudio 시작 시 `getFromNamespace` 함수를 찾을 수 없다는 오류는 시작 검증에서
 `utils::getFromNamespace`를 명시하도록 수정했습니다. R 기본 패키지들이 붙기 전에도
-동작하게 하는 수정이며, 이미 0.0.5가 설치되어 있다면 패키지 재설치는 필요 없습니다.
+동작하게 하는 과거 0.0.5 실행기 수정입니다. 그 수정만 적용할 때와 달리, 현재 0.0.7에는 패키지 업데이트가 필요합니다.
 수정 후 RStudio를 종료하고 번들의 `06_LAUNCH_RSTUDIO.ps1`로 다시 여십시오.
 
 ## 준비된 설계 행렬과 기존 실험
@@ -323,8 +383,8 @@ CKKS/Python 실험 등의 추가 의존성은 이번 기본 오프라인 런타�
 기존 `Start-Process`의 빈 ExitCode 문제를 피하며, 종료 코드가 없으면 명확한 오류로
 중단합니다. 성공으로 간주하거나 임의로 0을 넣지 않습니다.
 
-이미 FederatedPs 0.0.5를 설치한 서버에서는 실행기 패치만 적용하면 됩니다.
-R/Rtools/Java/Cyclops/FederatedPs를 다시 설치하거나 DB 설정을 바꿀 필요가 없습니다.
+이 절의 과거 0.0.5 종료 코드 핫픽스는 실행기만 수정했습니다. 현재 0.0.7은
+FederatedPs 패키지도 업데이트하며 R/Rtools/Java/Cyclops와 DB 설정은 재사용합니다.
 
 ```powershell
 .\windows\tests\Test-Launcher.ps1
@@ -370,7 +430,7 @@ R/Rtools/Java/Cyclops/FederatedPs를 다시 설치하거나 DB 설정을 바꿀 
 .\windows\Update-FederatedPs.ps1
 ```
 
-FederatedPs 0.0.6만 설치하고 기존 Cyclops/JDBC/의존성은 재사용합니다. 전체 C++ 재빌드인
+현재 소스의 FederatedPs 0.0.7만 설치하고 기존 Cyclops/JDBC/의존성은 재사용합니다. 전체 C++ 재빌드인
 `Install-Offline.ps1`을 반복할 필요는 없습니다. DB 설정과 `windows/common.R`의 로컬
 SSL 변경은 진행 표시용 패치에서 보존됩니다. 새 전체 번들의 기본 TLS 설정은 기존과 같습니다.
 
@@ -381,5 +441,5 @@ SSL 변경은 진행 표시용 패치에서 보존됩니다. 새 전체 번들�
 ```
 
 이 모니터에서 Ctrl+C는 모니터만 끝내며 분석 프로세스를 종료하지 않습니다.
-업데이트 전 시작한 작업에는 단계 이벤트가 없으므로 기존 로그를 표시하고
-%/ETA는 unknown입니다. 새 단계/진행률 표시는 업데이트 후 새 실행부터 적용됩니다.
+0.0.5 이하에서 시작한 작업은 단계 이벤트가 없어 %/ETA가 unknown입니다.
+0.0.6 실행은 기존 단계 이벤트를 표시하지만 0.0.7의 세분화된 SQL 단계는 새 실행부터 적용됩니다.
