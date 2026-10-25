@@ -29,7 +29,8 @@ fp_verify_runtime <- function(project) {
     if (!identical(utils::packageDescription("Cyclops")$RemoteSha, lock$cyclopsCommit) ||
         !all(c("aggregate", "blockSize", "alpha") %in% names(formals(Cyclops::createControl))))
         stop("Old Cyclops detected. Run Install-Offline.ps1 to build the pinned block CCD fork")
-    if (!identical(getFromNamespace(".protocolVersion", "FederatedPs"), lock$protocol))
+    # Rprofile runs before default packages (including utils) are attached.
+    if (!identical(utils::getFromNamespace(".protocolVersion", "FederatedPs"), lock$protocol))
         stop("FederatedPs protocol differs from runtime-lock.json")
     jar <- Sys.getenv("DATABASECONNECTOR_JAR_FOLDER")
     if (!nzchar(jar) || !dir.exists(jar)) stop("DATABASECONNECTOR_JAR_FOLDER is missing")

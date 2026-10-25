@@ -115,3 +115,25 @@ writers before reporting completion or a nonzero exit. Test-Launcher asserts
 that both streams have CanWrite=false before reading the large logs, so the
 lifecycle regression is detectable on Linux as well. Target Windows execution
 still needs verification; no R package reinstall is required.
+
+RStudio startup / real YUHS entry-point follow-up (2026-10-25):
+
+- A target-host screenshot showed an unqualified `getFromNamespace` call failed
+  in the startup profile, before utils was attached. `fp_verify_runtime` now
+  uses `utils::getFromNamespace`; all other checks remain in place. Reproduced
+  the lookup failure and confirmed qualified access with R 4.3.3 on Linux and
+  R_DEFAULT_PACKAGES=NULL. This is a namespace/startup check, not a test of the
+  installed Windows packages or RStudio GUI.
+- The same screenshot ran `extras/ConnectionDetails.R` without a legacy site
+  environment, so it tried to read `.Renviron.` before any DB connection. These
+  PostgreSQL examples now give an explicit Windows/YUHS entry-point message.
+  Checked both early guards without DatabaseConnector or any DB credentials;
+  the affected R source parses on R 4.3.3.
+- `Test-YUHS-Routing.ps1` additionally checks that explicit Test=false plus a
+  configuration file selects Database/YUHS with test=false and four workers.
+  The complete routing suite passes on Linux PowerShell 7.4.6 with the R/DB
+  boundary stubbed. Test=true continues to ignore DB settings.
+- Documented the PowerShell Terminal commands for RStudio and the distinct
+  repository/bundle roots. HIWARE login alone does not populate the JDBC
+  settings. Actual YUHS connectivity, SQL execution and Windows acceptance
+  remain to be verified on the target host. No package reinstall is required.

@@ -39,6 +39,14 @@ function Stop-FederatedWorkers { param($Workers) }
     $failed = $false
     try { & $run -Test $false } catch { $failed = $_.Exception.Message -match 'yuhs.Renviron' }
     if (-not $failed) { throw 'Test=false must require the real connection file, without synthetic fallback.' }
+    # The R/DB boundary is stubbed above: this checks routing, not connectivity.
+    'fixture-only settings' | Set-Content (Join-Path $temp 'config\yuhs.Renviron')
+    & $run -Test $false -WorkDirectory (Join-Path $temp 'database') -ExchangeDirectory (Join-Path $temp 'exchange')
+    $json = Get-ChildItem -Path (Join-Path $temp 'database') -Filter run.json -Recurse
+    $config = Get-Content -LiteralPath $json.FullName -Raw | ConvertFrom-Json
+    if ($config.mode -ne 'Database' -or $config.test -or $config.dataset -ne 'YUHS') {
+        throw 'Test=false with a settings file must select the real YUHS database path.'
+    }
     $failed = $false
     try { & $run -Test $true -Scenario studySpecific } catch { $failed = $_.Exception.Message -match 'Scenario=default' }
     if (-not $failed) { throw 'Unsupported sample scenarios must fail.' }

@@ -254,6 +254,42 @@ RStudio에서 R 4.6.1을 선택합니다. 이 실행기는 별도 라이브러�
 GUI 없이 `Run-FederatedPS.ps1`만으로 전체 분석을 실행할 수 있습니다.
 RStudio GUI와 실제 Windows Server 구동 여부는 대상 서버에서 확인해야 합니다.
 
+### RStudio에서 실제 YUHS 실행
+
+`extras/CodeToRun.R`와 `extras/ConnectionDetails.R`는 기존 PostgreSQL 예제입니다.
+Windows/YUHS에서는 실행하지 않습니다. `FEDERATEDPS_SITE`가 없는 상태에서 해당
+예제를 실행하면 `.Renviron.` 파일을 찾다가 실패하며, 이는 DB 접속을 시도하기 전의
+설정 오류입니다. YUHS 설정 파일은 `windows/config/yuhs.Renviron`입니다.
+
+HIWARE 로그인 후 위의 SQL Server 접속 설정을 저장합니다. **R Console의 `>` 프롬프트가
+아닌 Terminal 탭의 PowerShell(`PS ...>`)**에서 저장소 루트로 이동해 실행합니다.
+Terminal이 cmd라면 먼저 `powershell`을 입력해 PowerShell로 전환합니다.
+
+```powershell
+Set-Location -LiteralPath 'C:\FederatedPS_YUHS_Offline\FederatedPS'
+.\windows\Run-YUHS.ps1 -Test $false -Study ppi -Scenario default
+```
+
+번들 최상위 폴더에서 실행할 때는 다음과 같습니다. 03번은 기존 설정을 보존하며
+편집기로 엽니다. HIWARE 로그인과 별도로 JDBC가 사용할 DB 계정·접속 주소가 필요합니다.
+
+```powershell
+Set-Location -LiteralPath 'C:\FederatedPS_YUHS_Offline'
+.\03_CONFIGURE_YUHS.ps1
+.\05_RUN_YUHS.ps1 -Test $false -Study ppi -Scenario default
+```
+
+실행 초기에 `TEST=false: real database run`이 표시되어야 합니다. Test를 생략하면
+기본값은 여전히 true이며 합성 CDM을 실행합니다. 이 실행기는 집계기와 세 기관을 함께
+시작하므로 RStudio 창 세 개를 열거나 사이트 이름을 수동 지정할 필요가 없습니다.
+실제 추출·계산이 끝나면 `PASS: all roles completed` 및 해당 RunId의 `SUCCESS.txt`를
+확인합니다. 시작 시의 runtime/preflight PASS만으로 DB 연결 성공을 판단하지 않습니다.
+
+RStudio 시작 시 `getFromNamespace` 함수를 찾을 수 없다는 오류는 시작 검증에서
+`utils::getFromNamespace`를 명시하도록 수정했습니다. R 기본 패키지들이 붙기 전에도
+동작하게 하는 수정이며, 이미 0.0.5가 설치되어 있다면 패키지 재설치는 필요 없습니다.
+수정 후 RStudio를 종료하고 번들의 `06_LAUNCH_RSTUDIO.ps1`로 다시 여십시오.
+
 ## 준비된 설계 행렬과 기존 실험
 
 DB 재추출 없이 사이트별 RDS(`x`, `treatment`, `rowIds`를 갖는 list)를 실행할 수 있습니다.
