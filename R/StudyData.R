@@ -8,6 +8,10 @@
 #' @param scenario Design from [getStudySettings()].
 #' @param careSiteId SQL Server institution ID from `CARE_SITE`, linked through
 #'   `VISIT_OCCURRENCE`. Required on SQL Server; leave `NULL` on PostgreSQL.
+#' @param patientLimit SQL Server smoke-test cap per institution, before
+#'   CohortMethod creation. Zero uses all candidates; otherwise at least two.
+#'   Deterministic, approximately arm-balanced exposure candidates are selected.
+#'   Later eligibility filters can leave fewer patients or an empty arm.
 #' @return Hospital-local [CohortMethod::CohortMethodData] for [fitPs()].
 #'   Its `metaData` attribute contains `studyDefinition`, `resolvedIngredients`
 #'   and the final cohort counts in `attrition`. No outcomes are extracted.
@@ -36,7 +40,9 @@
 #'   CohortMethodData directly to [fitPs()].
 #' @export
 getDbStudyData <- function(connectionDetails, cdmDatabaseSchema, study = "opioid",
-                           scenario = c("default", "studySpecific"), careSiteId = NULL) {
+                           scenario = c("default", "studySpecific"), careSiteId = NULL,
+                           patientLimit = 0L) {
+    patientLimit <- .validatePatientLimit(patientLimit)
     settings <- getStudySettings(study, scenario)
     .validateCdmSchema(cdmDatabaseSchema)
     .fpsProgress("connecting", "Opening database connection")
@@ -48,8 +54,9 @@ getDbStudyData <- function(connectionDetails, cdmDatabaseSchema, study = "opioid
     .fpsProgress("connected", "Database connection established")
     dbms <- DatabaseConnector::dbms(connection)
     if (identical(dbms, "sql server")) {
-        return(.getCareSiteStudyData(connection, cdmDatabaseSchema, settings, careSiteId))
+        return(.getCareSiteStudyData(connection, cdmDatabaseSchema, settings, careSiteId, patientLimit))
     }
+    if (patientLimit > 0L) stop("patientLimit is supported only for SQL Server care-site studies")
     if (!identical(dbms, "postgresql") || !is.null(careSiteId) ||
         grepl("[.]", cdmDatabaseSchema) || grepl("^pg_", cdmDatabaseSchema, ignore.case = TRUE)) {
         stop("Use a PostgreSQL schema without careSiteId, or SQL Server with careSiteId")

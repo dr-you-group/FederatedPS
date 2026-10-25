@@ -1,6 +1,9 @@
 #Requires -Version 5.1
 [CmdletBinding()]
 param(
+    [ValidateSet('local-only','pooled','federated')][string[]]$Methods=@('federated'),
+    [ValidateRange(0,2147483647)][int]$PatientLimit=0,
+    [string]$CacheDirectory='', [switch]$RebuildData,
     [switch]$NoProgress,
     [bool]$Test = $true,
     [string]$Study = 'ppi',
@@ -21,4 +24,7 @@ $ErrorActionPreference = 'Stop'
 # Pass the effective default explicitly: PSBoundParameters omits defaults.
 $forward = @{} + $PSBoundParameters
 $forward['Test'] = $Test
-& (Join-Path $PSScriptRoot 'Run-FederatedPS.ps1') -Mode Database -Dataset YUHS @forward
+if(-not $Methods.Count -or @($Methods | Sort-Object -Unique).Count -ne $Methods.Count){throw 'Select one or more distinct Methods.'}
+$Methods=@($Methods | ForEach-Object { $_.ToLowerInvariant() })
+$forward['Methods']=$Methods
+& (Join-Path $PSScriptRoot 'Run-YUHS-Methods.ps1') @forward

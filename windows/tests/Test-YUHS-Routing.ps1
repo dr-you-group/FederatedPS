@@ -24,7 +24,11 @@ function Wait-FederatedWorkers { param($Workers,$TimeoutSeconds)
 }
 function Stop-FederatedWorkers { param($Workers) }
 '@ | Set-Content -LiteralPath (Join-Path $temp 'Common.ps1') -Encoding UTF8
-    $run = Join-Path $temp 'Run-YUHS.ps1'
+    $run = Join-Path $temp 'Legacy-YUHS.ps1'
+    @'
+param([bool]$Test=$true,$BlockSize=1,$Alpha=1,$InitialTimeoutSeconds=21600,$SmallQueryTimeoutSeconds=60,$DbQueryTimeoutSeconds=7200,$WorkDirectory,$ExchangeDirectory,$Scenario='default')
+& (Join-Path $PSScriptRoot 'Run-FederatedPS.ps1') -Mode Database -Dataset YUHS -Test $Test -BlockSize $BlockSize -Alpha $Alpha -InitialTimeoutSeconds $InitialTimeoutSeconds -SmallQueryTimeoutSeconds $SmallQueryTimeoutSeconds -DbQueryTimeoutSeconds $DbQueryTimeoutSeconds -WorkDirectory $WorkDirectory -ExchangeDirectory $ExchangeDirectory -Scenario $Scenario
+'@ | Set-Content $run
     & $run -WorkDirectory (Join-Path $temp 'default') -ExchangeDirectory (Join-Path $temp 'exchange')
     $json = Get-ChildItem -Path (Join-Path $temp 'default') -Filter run.json -Recurse
     $config = Get-Content -LiteralPath $json.FullName -Raw | ConvertFrom-Json

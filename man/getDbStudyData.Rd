@@ -9,7 +9,8 @@ getDbStudyData(
   cdmDatabaseSchema,
   study = "opioid",
   scenario = c("default", "studySpecific"),
-  careSiteId = NULL
+  careSiteId = NULL,
+  patientLimit = 0L
 )
 }
 \arguments{
@@ -24,6 +25,10 @@ vocabulary tables. SQL Server also accepts \code{database.schema}.}
 \item{scenario}{Design from \code{\link[=getStudySettings]{getStudySettings()}}.}
 \item{careSiteId}{SQL Server institution ID from CARE_SITE, linked through
 VISIT_OCCURRENCE. Required on SQL Server; leave NULL on PostgreSQL.}
+\item{patientLimit}{SQL Server smoke-test cap per institution before CohortMethod.
+Zero uses all candidates; otherwise an integer of at least two. Deterministic,
+approximately arm-balanced exposure candidates are selected. Later eligibility
+filters can leave fewer patients or an empty treatment arm.}
 }
 \value{
 Hospital-local \link[CohortMethod:CohortMethodData]{CohortMethod::CohortMethodData} for \code{\link[=fitPs]{fitPs()}}.

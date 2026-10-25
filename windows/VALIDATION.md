@@ -1,3 +1,14 @@
+## 0.0.8 method selection and extraction checkpoints
+
+New base-R checks: `windows/tests/test-baseline-models.R`, `test-data-cache.R`.
+New PowerShell checks: `Test-MethodsSelection.ps1`, `Test-BaselineRouting.ps1`.
+These validate all seven selections, bounded candidate sampling, shared-row feature alignment,
+patient disjointness, coefficient/prediction checks, completed-cache identity/integrity,
+partial-write exclusion, and failure gating. Process and native model boundaries in routing
+tests are stubbed. SQL Server LimitPatients.sql has structural checks and portable CTE semantics exercised in
+SQLite (`test-patient-limit-sql.py`), not a live SQL Server test.
+Native Cyclops/Windows/HIWARE integration remains a target-host test; see METHODS_KO.md.
+
 # Validation of native Windows entry points
 
 Validation performed on 2026-10-24:

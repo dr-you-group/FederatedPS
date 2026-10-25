@@ -14,6 +14,13 @@
     as.integer(id)
 }
 
+.validatePatientLimit <- function(limit) {
+    if (!is.numeric(limit) || length(limit) != 1L || is.na(limit) || !is.finite(limit) ||
+        limit != floor(limit) || limit < 0 || limit == 1 || limit > .Machine$integer.max)
+        stop("patientLimit must be zero (unlimited) or an integer of at least two per site")
+    as.integer(limit)
+}
+
 .careSiteAnalysis <- function(settings) {
     result <- data.frame(analysisId = c(1L, 2L),
         analysisName = c("Gender", "Age in five-year groups (index year minus birth year)"),
@@ -55,8 +62,9 @@
     paste(sql, collapse = "\nUNION ALL\n")
 }
 
-.getCareSiteStudyData <- function(connection, schema, settings, careSiteId) {
+.getCareSiteStudyData <- function(connection, schema, settings, careSiteId, patientLimit = 0L) {
     careSiteId <- .validateCareSiteId(careSiteId)
+    patientLimit <- .validatePatientLimit(patientLimit)
     .validateCdmSchema(schema)
     currentStep <- 0
     currentDetail <- "Preparing extraction"
@@ -167,6 +175,10 @@
             prior_days = settings$priorObservationDays, indication_days = settings$indicationDays,
             washout_days = settings$washoutDays)
     } else execute("DefaultStudy.sql")
+    if (patientLimit > 0L) {
+        step(5, paste("Limiting exposure candidates to", patientLimit, "persons before CohortMethod"))
+        execute("LimitPatients.sql", patient_limit = patientLimit)
+    }
     step(6, "CohortMethod: preparing cohort SQL")
     sql <- .fpsDbOperation("CohortMethod: rendering CreateOrCountCohorts.sql",
         SqlRender::loadRenderTranslateSql("CreateOrCountCohorts.sql", packageName = "CohortMethod",
@@ -190,6 +202,7 @@
     cohorts$rowId <- as.numeric(cohorts$rowId)
     if (anyNA(cohorts$rowId) || anyDuplicated(cohorts$rowId) || anyDuplicated(cohorts$personId))
         stop("Expected one row per person; inspect native observation periods")
+    if (patientLimit > 0L && nrow(cohorts) > patientLimit) stop("Patient cap was exceeded")
     counts <- c(target = sum(cohorts$treatment == 1), comparator = sum(cohorts$treatment == 0))
     message("care_site_id ", careSiteId, ": target = ", counts[1], ", comparator = ", counts[2])
     if (any(counts == 0)) stop("Both treatment groups are required; study criteria were not relaxed")
@@ -223,6 +236,9 @@
     settings$exposureSource <- "visit-linked drug_exposure (not pooled drug_era)"
     settings$featureDefinition <- "care-site-binary-v1"
     settings$partitionPolicy <- "exclude persons visiting multiple positive care_site_ids"
+    settings$patientLimit <- patientLimit
+    settings$samplingPolicy <- if (patientLimit > 0L)
+        "deterministic alternating earliest-exposure arms before CohortMethod; smoke test only" else "all candidates"
     attr(data, "metaData") <- list(targetId = 1, comparatorId = 2, studyDefinition = settings,
         resolvedIngredients = resolved, careSite = institution, sitePartition = partition,
         recordLinkage = linkage, attrition = data.frame(description = "Site-local study-eligible subjects",
