@@ -298,3 +298,7 @@ R/Rtools/Java/Cyclops/FederatedPs를 다시 설치하거나 DB 설정을 바꿀 
 수정 후 숫자가 있는 `failed (exit 1)` 등의 메시지가 나오면 해당 역할의
 `run.stderr.log`와 `run.stdout.log`를 확인하십시오. 이는 실제 자식 프로세스의 실패이며
 무시하면 안 됩니다. `Test=true` 실행은 HIWARE 로그인 및 실제 DB 접속이 필요 없습니다.
+
+`noisy.stdout.log ... being used by another process`는 첫 실행기 수정의 로그 닫기
+순서에서 발생한 문제입니다. 후속 수정은 로그 복사가 완료된 후 파일 쓰기 핸들을
+즉시 닫고 검사하도록 변경했습니다. 해당 패치 후 04번을 다시 실행하십시오.

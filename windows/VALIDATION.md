@@ -106,3 +106,12 @@ Windows PowerShell 5.1 exit-code hotfix (2026-10-25):
   The screenshot alone does not establish that the R aggregator succeeded.
 - This is a launcher-only hotfix. FederatedPs remains 0.0.5 and no R package
   or dependency reinstallation is needed when updating the previous bundle.
+
+Log-close follow-up (2026-10-25): the first exit-code hotfix left completed
+log FileStreams open until Stop-FederatedWorkers. On Windows, ReadAllText's
+FileShare.Read conflicts with that existing write handle even if the writer
+itself permits readers. Wait-FederatedWorkers now flushes AND disposes both
+writers before reporting completion or a nonzero exit. Test-Launcher asserts
+that both streams have CanWrite=false before reading the large logs, so the
+lifecycle regression is detectable on Linux as well. Target Windows execution
+still needs verification; no R package reinstall is required.

@@ -65,6 +65,9 @@ try {
     $prefix = Join-Path $root 'noisy'
     $workers += Start-FederatedWorker $executable @('-NoProfile','-File',$noisy) $root $prefix 'noisy'
     Wait-FederatedWorkers $workers 30
+    if ($workers[0].StdoutStream.CanWrite -or $workers[0].StderrStream.CanWrite) {
+        throw 'Completed log writers must be closed before callers read their logs.'
+    }
     foreach ($stream in @('stdout','stderr')) {
         if (([IO.File]::ReadAllText("$prefix.$stream.log")).Length -ne 262144) { throw "Truncated $stream log." }
     }

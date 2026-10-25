@@ -128,6 +128,11 @@ function Wait-FederatedWorkers([object[]]$Workers, [int]$TimeoutSeconds) {
                 [void]$worker.StderrTask.GetAwaiter().GetResult()
                 $worker.StdoutStream.Flush()
                 $worker.StderrStream.Flush()
+                # ReadAllText opens with FileShare.Read on Windows. Even though
+                # our writer allows readers, that new reader does not share an
+                # existing write handle. Release writers before reporting done.
+                $worker.StdoutStream.Dispose()
+                $worker.StderrStream.Dispose()
                 $exitCode = $worker.Process.ExitCode
                 if ($null -eq $exitCode) {
                     throw "No exit code was available for role $($worker.Role). Completion cannot be verified. See $($worker.LogPrefix).stderr.log"
