@@ -12,7 +12,16 @@ DB 비밀번호와 실제 환자 데이터는 들어 있지 않습니다.
 
 ## 1. 반입과 압축 해제
 
-ZIP을 새 서버로 반입하고 `C:\`에 풀어 다음 경로로 만드십시오.
+배포 파일은 아래 **3개 ZIP 전부**를 반입합니다. 각 ZIP은 독립적으로 압축 해제할 수 있으며,
+세 파일을 이어 붙이는 방식이 아닙니다.
+
+- `FederatedPS_YUHS_Fresh_2026-10-26_A_Core.zip`: 설치/실행 스크립트, R, Java, R 패키지, 저장소, JDBC.
+- `FederatedPS_YUHS_Fresh_2026-10-26_B_Rtools.zip`: Rtools45 설치 파일.
+- `FederatedPS_YUHS_Fresh_2026-10-26_C_RStudio.zip`: RStudio Desktop 설치 파일.
+
+각 ZIP의 **압축 해제 대상을 모두 `C:\`로 지정**합니다. 내부의 같은 최상위 폴더가 합쳐져
+아래 경로가 만들어집니다. ZIP 이름별 하위 폴더에 따로 풀면 SETUP이 필요한 파일을 찾지 못합니다.
+00 검사가 세 ZIP의 모든 파일을 확인하므로, 압축을 모두 푼 다음 설치를 시작하십시오.
 
 ```text
 C:\FederatedPS_YUHS_Offline\SETUP.ps1
