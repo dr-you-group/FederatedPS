@@ -43,7 +43,8 @@ fp_verify_runtime <- function(project) {
 }
 
 fp_connection_keys <- function() c("PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD",
-    "CDM_DATABASE_SCHEMA", "DBMS", "DB_SERVER", "DB_PORT", "DB_DATABASE", "DB_USER", "DB_PASSWORD")
+    "CDM_DATABASE_SCHEMA", "DBMS", "DB_SERVER", "DB_PORT", "DB_DATABASE", "DB_USER", "DB_PASSWORD",
+    "DB_ENCRYPT", "DB_TRUST_SERVER_CERTIFICATE")
 
 fp_read_connection_values <- function(path, yuhs = FALSE) {
     keys <- if (yuhs) c("DBMS", "DB_SERVER", "DB_PORT", "DB_DATABASE", "DB_USER", "DB_PASSWORD", "CDM_DATABASE_SCHEMA") else
@@ -83,12 +84,19 @@ fp_read_connection <- function(path) {
 
 fp_read_yuhs_connection <- function(path) {
     values <- fp_read_connection_values(path, yuhs = TRUE)
+    tls_value <- function(name, default) {
+        value <- tolower(trimws(Sys.getenv(name, unset = default)))
+        if (!value %in% c("true", "false")) stop(name, " must be true or false")
+        value
+    }
+    encrypt <- tls_value("DB_ENCRYPT", "true")
+    trust <- tls_value("DB_TRUST_SERVER_CERTIFICATE", "false")
     driver <- file.path(Sys.getenv("DATABASECONNECTOR_JAR_FOLDER"), "sqlserver")
     if (!length(list.files(driver, "^mssql-jdbc.*[.]jar$"))) stop("Offline SQL Server JDBC missing")
     DatabaseConnector::createConnectionDetails(dbms = "sql server", server = values$DB_SERVER,
         port = as.integer(values$DB_PORT), user = values$DB_USER, password = values$DB_PASSWORD,
         extraSettings = paste0("databaseName=", values$DB_DATABASE,
-            ";encrypt=true;trustServerCertificate=false"), pathToDriver = driver)
+            ";encrypt=", encrypt, ";trustServerCertificate=", trust), pathToDriver = driver)
 }
 
 fp_check_yuhs_sites <- function(config) {

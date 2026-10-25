@@ -1,0 +1,20 @@
+# Isolated local preflight. This file never reads DB credentials or opens a DB.
+args <- commandArgs(trailingOnly=TRUE)
+stopifnot(length(args)==1L)
+project <- normalizePath(args[1],winslash="/",mustWork=TRUE)
+source(file.path(project,"windows","common.R"))
+fp_verify_runtime(project)
+path <- system.file("sql","sql_server","SitePartition.sql",package="FederatedPs")
+stopifnot(nzchar(path))
+template <- paste(readLines(path,warn=FALSE),collapse="\n")
+cat("START: local SqlRender SitePartition render (no DB)\n");flush(stdout())
+for (site in 1:3) {
+    sql <- SqlRender::render(template,cdm_database_schema="CDM54_2601.CDM",care_site_id=site)
+    stopifnot(!grepl("@cdm_database_schema|@care_site_id",sql))
+    statements <- SqlRender::splitSql(sql)
+    stopifnot(length(statements)==7L)
+    cat("PASS: SitePartition render/split site_id=",site," statements=",length(statements),"\n",sep="")
+    flush(stdout())
+}
+cat("PASS: local rendering only; this does not prove post-connection rendering or DB performance.\n")
+quit(save="no",status=0L,runLast=FALSE)

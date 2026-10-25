@@ -1,0 +1,21 @@
+args <- commandArgs(trailingOnly=TRUE)
+stopifnot(length(args)==2L, .Platform$OS.type=="windows", getRversion()=="4.6.1", .Machine$sizeof.pointer==8L)
+archives <- normalizePath(args[1], winslash="/", mustWork=TRUE)
+lib <- normalizePath(args[2], winslash="/", mustWork=TRUE)
+.libPaths(c(lib, .libPaths()))
+options(repos=NULL, install.packages.check.source="no")
+lock <- read.dcf(file.path(archives,"PACKAGE_LOCK.dcf"))
+stopifnot(nrow(lock)>0, !anyDuplicated(lock[,"Package"]))
+for (i in seq_len(nrow(lock))) {
+    package <- lock[i,"Package"]
+    path <- file.path(archives, lock[i,"File"])
+    if (!file.exists(path)) stop("Missing local Windows archive: ",path)
+    installed <- installed.packages(lib.loc=lib, noCache=TRUE)
+    ready <- package %in% rownames(installed) && identical(installed[package,"Version"],lock[i,"Version"])
+    cat(sprintf("[%d/%d] %s %s: %s\n",i,nrow(lock),package,lock[i,"Version"],if(ready) "already installed" else "installing local ZIP"))
+    flush(stdout())
+    if (!ready) install.packages(path, lib=lib, repos=NULL, type="win.binary", dependencies=FALSE)
+    info <- installed.packages(lib.loc=lib, noCache=TRUE)
+    if (!package %in% rownames(info) || !identical(info[package,"Version"],lock[i,"Version"])) stop("Binary installation failed: ",package)
+}
+cat("PASS: all locked Windows dependency binaries installed.\n")
