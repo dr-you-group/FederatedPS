@@ -32,7 +32,18 @@ try {
     '{' | Set-Content (Join-Path $root 'baselines/sites/17.json')
     Update-FederatedMonitor $m -Force
     if($m.Disabled -or $m.SiteStates[0].State -ne 'local-fitting'){throw 'Partial snapshot disabled monitor'}
-    @{mode='SelectedMethods';sites=@('17','42','99');siteLabels=@{'17'='A';'42'='B';'99'='C'}} |
+    # Concurrent roles keep independent snapshots and native exit states.
+    foreach($id in @('17','42')) {
+        $d=Join-Path $root ($id+'/sites');New-Item -ItemType Directory -Path $d -Force | Out-Null
+        $e.siteId=$id;$e.role=$id;$e.siteState='extracting';$e.stage='extract';$e.timestamp=[DateTime]::UtcNow.ToString('o')
+        $e | ConvertTo-Json -Depth 6 -Compress | Set-Content (Join-Path $d ($id+'.json'))
+    }
+    $parallel=New-FederatedMonitor $root @('17','42','99','baselines') -Sites @('17','42','99') -NoProgress
+    $failed=[pscustomobject]@{Role='17';FinalExitCode=7}
+    Update-FederatedMonitor $parallel @($failed) -Force
+    if($parallel.Disabled -or $parallel.SiteStates[0].State -ne 'failed/stopped' -or
+        $parallel.SiteStates[1].State -ne 'extracting' -or $parallel.SiteStates[2].State -ne 'queued'){throw 'Parallel site failure/status isolation failed'}
+    @{mode='SelectedMethods';extractionWorkers=3;sites=@('17','42','99');siteLabels=@{'17'='A';'42'='B';'99'='C'}} |
         ConvertTo-Json | Set-Content (Join-Path $root 'run.json')
     $before=@(Get-ChildItem $root -File -Recurse | Sort-Object FullName | ForEach-Object {(Get-FileHash $_.FullName).Hash}) -join ','
     & (Join-Path $PSScriptRoot '../Watch-FederatedRun.ps1') -RunDirectory $root -Once -NoProgress

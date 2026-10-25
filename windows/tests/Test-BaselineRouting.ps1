@@ -5,6 +5,7 @@ $temp=Join-Path ([IO.Path]::GetTempPath()) ('fps-methods-'+[guid]::NewGuid().ToS
 New-Item -ItemType Directory -Path (Join-Path $temp 'config') -Force | Out-Null
 try {
     Copy-Item (Join-Path $project 'windows\Run-YUHS-Methods.ps1') $temp
+    Copy-Item (Join-Path $project 'windows\ConnectionWatchdog.ps1') $temp
     Copy-Item (Join-Path $project 'windows\config\yuhs-sites.json') (Join-Path $temp 'config\yuhs-sites.json')
     @'
 $ErrorActionPreference='Stop'
@@ -15,6 +16,8 @@ function Invoke-FederatedR {param($Rscript,$Arguments)}
 function Start-FederatedRWorker {param($Runtime,$Script,$Arguments,$WorkingDirectory,$LogPrefix,$Role)
     $c=Get-Content $Arguments[0] -Raw | ConvertFrom-Json
     if($Role -eq 'baselines'){
+        if($c.extractionWorkers -gt 1 -and -not(Test-Path (Join-Path $c.output 'prepared-sites.fixture'))){throw 'Models started before site preparation'}
+        if($c.extractionWorkers -eq 1 -and (Test-Path (Join-Path $c.output 'prepared-sites.fixture'))){throw 'Sequential path launched site workers'}
         if($Script -notmatch 'run-baselines[.]R$'){throw 'Unexpected extraction worker'}
         if($c.PSObject.Properties['exchange']){throw 'Baseline must not configure exchange'}
         $folders=@()
@@ -64,10 +67,20 @@ function Complete-FederatedMonitor {param($Monitor)}
 function Write-FederatedProcessMetadata {param($Directory,$Workers)}
 '@ | Set-Content (Join-Path $temp 'Monitor.ps1')
     '' | Set-Content (Join-Path $temp 'RunDiagnostics.Common.ps1')
+    @'
+function Invoke-FederatedSitePreparation {
+    param($Runtime,$Project,$ConfigFile,$RunDirectory,$Sites,$MaxWorkers,$Deadline,$ShutdownSeconds,$Monitor,[ref]$Workers)
+    $c=Get-Content $ConfigFile -Raw | ConvertFrom-Json
+    if($MaxWorkers -ne $c.extractionWorkers -or $MaxWorkers -lt 2 -or $MaxWorkers -gt 3 -or ($Sites -join ',') -ne ($c.sites -join ',')){throw 'Wrong extraction concurrency/sites'}
+    if($c.study -eq 'fixturePreparationFail'){throw 'Site preparation failed'}
+    Set-Content (Join-Path $RunDirectory 'prepared-sites.fixture') $MaxWorkers
+}
+'@ | Set-Content (Join-Path $temp 'SitePreparation.ps1')
     $run=Join-Path $temp 'Run-YUHS-Methods.ps1'
     $work=Join-Path $temp 'work'
     & $run -RunId default -WorkDirectory $work
     $c=Get-Content (Join-Path $work 'default/run.json') -Raw | ConvertFrom-Json
+    if($c.extractionWorkers -ne 3 -or $c.requestedExtractionWorkers -ne 3 -or $c.connectionCheckTimeout -ne 180){throw 'Wrong parallel/startup defaults'}
     if(-not $c.test -or $c.mode -ne 'SelectedMethods' -or $c.priorVariance -ne 1){throw 'Wrong defaults'}
     foreach($limits in @(@{other=200},@{2=1},@{1=-1},@{3=2.5},@{2=$null},@{3=$true},@{severance=200})){
         $bad=$false;try{& $run -PatientLimits $limits -WorkDirectory $work}catch{$bad=$_.Exception.Message -match 'PatientLimits'}
@@ -96,7 +109,7 @@ function Write-FederatedProcessMetadata {param($Directory,$Workers)}
     $caught=$false
     try{& $run -RunId default -WorkDirectory $work}catch{$caught=$_.Exception.Message -match 'already exists'}
     if(-not $caught){throw 'Existing run overwrite permitted'}
-    foreach($case in @(@('fixtureMissing','without verified'),@('fixtureNativeFail','Native exit'),@('fixtureFedFail','Federated native'),@('fixtureMissingMap','not mapped'),@('fixtureBadMap','Invalid federated mapping'))){
+    foreach($case in @(@('fixturePreparationFail','Site preparation failed'),@('fixtureMissing','without verified'),@('fixtureNativeFail','Native exit'),@('fixtureFedFail','Federated native'),@('fixtureMissingMap','not mapped'),@('fixtureBadMap','Invalid federated mapping'))){
         $caught=$false;$id=$case[0]
         try{& $run -Methods local-only,pooled,federated -Test $false -Study $id -RunId $id -WorkDirectory $work}catch{$caught=$_.Exception.Message -match $case[1]}
         if(-not $caught -or (Test-Path (Join-Path $work "$id/SUCCESS.txt"))){throw "Failed completion accepted: $id"}
@@ -109,5 +122,14 @@ function Write-FederatedProcessMetadata {param($Directory,$Workers)}
     & $run -Test $false -RunId customorder -WorkDirectory $work -Sites @('99','17','42')
     $c=Get-Content (Join-Path $work 'customorder/run.json') -Raw | ConvertFrom-Json
     if(($c.sites -join ',') -ne '99,17,42'){throw 'Explicit site order was not respected'}
-    Write-Host 'PASS: seven method combinations; one extraction worker; prepared federation; settings; native failures and missing/stale completion rejected.'
+    foreach($count in @(1,2)){
+        & $run -Test $false -RunId ('workers'+$count) -WorkDirectory $work -ExtractionWorkers $count
+        $c=Get-Content (Join-Path $work ('workers'+$count+'/run.json')) -Raw | ConvertFrom-Json
+        if($c.extractionWorkers -ne $count){throw 'Concurrency override lost'}
+    }
+    '{"first":17,"second":42}' | Set-Content (Join-Path $temp 'config/yuhs-sites.json')
+    & $run -Test $false -RunId twosites -WorkDirectory $work -ExtractionWorkers 3
+    $c=Get-Content (Join-Path $work 'twosites/run.json') -Raw | ConvertFrom-Json
+    if($c.extractionWorkers -ne 2 -or $c.requestedExtractionWorkers -ne 3){throw 'Workers not capped to configured site count'}
+    Write-Host 'PASS: seven method combinations; default three workers and 1/2 overrides; model barrier; prepared federation; settings; native/preparation/missing/stale failure gates.'
 } finally {Remove-Item -LiteralPath $temp -Recurse -Force}

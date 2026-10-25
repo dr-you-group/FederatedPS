@@ -26,6 +26,10 @@ stopifnot(is.null(fp_cache_read(out,contract,"severance")))
 path <- fp_cache_write(out,contract,"severance",design)
 loaded <- fp_cache_read(out,contract,"severance")
 stopifnot(identical(loaded$design,design),identical(loaded$path,path))
+stopifnot(identical(fp_cache_read(out,contract,"severance",entryName=basename(path))$design,design))
+error(fp_cache_read(out,contract,"severance",entryName="../entry-evil.ready"),"Invalid prepared")
+error(fp_cache_read(out,contract,"severance",entryName="entry-missing.ready"),"not found")
+error(fp_cache_read(out,contract,"missing",entryName="entry-missing.ready"),"not found")
 changed <- contract;changed$patientLimit <- 200L
 stopifnot(is.null(fp_cache_read(out,changed,"severance")))
 changed <- contract;changed$test <- FALSE
@@ -33,6 +37,7 @@ stopifnot(is.null(fp_cache_read(out,changed,"severance")))
 changed <- contract;changed$connectionHash <- "other-database"
 stopifnot(is.null(fp_cache_read(out,changed,"severance")))
 changed <- config;changed$methods <- "federated";changed$blockSize <- 4;changed$alpha <- 0.5
+changed$extractionWorkers <- 3
 stopifnot(identical(contract,fp_data_contract(changed,runtimeVersions=c(FederatedPs="fixture"))))
 # A crash mid-write must never produce a reusable checkpoint.
 parent <- file.path(out,fp_object_md5(contract),"gangnam")
@@ -45,6 +50,27 @@ error(fp_cache_read(out,contract,"severance"),"checksum")
 # Rebuild writes a fresh generation without changing/destroying old one.
 newPath <- fp_cache_write(out,contract,"severance",design)
 stopifnot(newPath!=path,dir.exists(path),identical(fp_cache_read(out,contract,"severance")$design,design))
+# Hand-off pins the worker's generation, even if a concurrent run creates a
+# newer ready cache. Never silently fall back to extraction or another entry.
+run <- config;run$output <- file.path(out,"run");run$runId <- "thisRun";run$cacheDirectory <- out
+dir.create(file.path(run$output,"severance"),recursive=TRUE)
+receiptPath <- file.path(run$output,"severance","preparation-complete.json")
+receipt <- list(runId="thisRun",site="severance",state="extraction-complete",
+    entryName=basename(newPath),reused=FALSE,patients=nrow(design$x))
+writeReceipt <- function(value) jsonlite::write_json(value,receiptPath,auto_unbox=TRUE)
+writeReceipt(receipt)
+newerPath <- fp_cache_write(out,contract,"severance",design)
+prepared <- fp_prepared_cache_read(run,contract,"severance")
+stopifnot(identical(prepared$path,newPath),identical(prepared$reused,FALSE))
+for (field in c("runId","site","state","entryName","reused","patients")) {
+    bad <- receipt;bad[[field]] <- if(field=="patients") 9999 else "wrong"
+    writeReceipt(bad)
+    error(fp_prepared_cache_read(run,contract,"severance"),"Invalid|differs")
+}
+writeReceipt(receipt)
+unlink(newPath,recursive=TRUE)
+error(fp_prepared_cache_read(run,contract,"severance"),"not found")
+stopifnot(dir.exists(newerPath))
 # Limits belong to the individual site key, not the shared model contract.
 perSite <- config;perSite$sites <- c("1","2","3");perSite$careSites <- list(`1`=1,`2`=2,`3`=3);perSite$patientLimits <- list(`1`=20,`2`=10,`3`=30)
 one <- fp_data_contract(perSite,runtimeVersions=c(FederatedPs="fixture"),site="1")

@@ -12,6 +12,7 @@ param(
     [ValidateRange(0.000001,1.0)][double]$Alpha=1,
     [ValidateRange(0.000000000001,0.01)][double]$Tolerance=0.000001,
     [ValidateRange(1,86400)][int]$SmallQueryTimeoutSeconds=60,
+    [ValidateRange(30,86400)][int]$ConnectionCheckTimeoutSeconds=180,
     [ValidateRange(1,2147483647)][int]$DbQueryTimeoutSeconds=7200,
     [ValidateRange(1,2147483647)][int]$ExchangeTimeoutSeconds=3600,
     [ValidateRange(1,2147483647)][int]$InitialTimeoutSeconds=21600,
@@ -19,6 +20,7 @@ param(
     [ValidateRange(1,3600)][int]$ShutdownTimeoutSeconds=60,
     [string]$RunId=([guid]::NewGuid().ToString('N')), [switch]$NoProgress,
     [ValidateRange(1,3600)][int]$StatusSeconds=15,
+    [ValidateRange(1,3)][int]$ExtractionWorkers=3,
     [string]$ConfigDirectory='', [string]$WorkDirectory='', [string]$ExchangeDirectory='',
     [string]$InstallRoot='C:\FederatedPS',
     [string]$RHome='C:\Program Files\R\R-4.6.1', [string]$JavaHome=''
@@ -26,6 +28,7 @@ param(
 . (Join-Path $PSScriptRoot 'Common.ps1')
 . (Join-Path $PSScriptRoot 'Monitor.ps1')
 . (Join-Path $PSScriptRoot 'RunDiagnostics.Common.ps1')
+. (Join-Path $PSScriptRoot 'ConnectionWatchdog.ps1')
 $project=Get-FederatedProject
 if($PatientLimit -eq 1){throw 'PatientLimit must be 0 (unlimited) or at least 2 per institution.'}
 if(-not $Methods.Count -or @($Methods | Sort-Object -Unique).Count -ne $Methods.Count){throw 'Select distinct Methods.'}
@@ -62,6 +65,7 @@ foreach($key in $PatientLimits.Keys){
     $resolvedLimits[$site]=[int]$parsed
 }
 $sites=$Sites
+$effectiveWorkers=[Math]::Min($ExtractionWorkers,$sites.Count)
 if($Test -and ($Study -cne 'ppi' -or $Scenario -ne 'default')) { throw 'Test=true supports only ppi/default.' }
 if(-not $ConfigDirectory){$ConfigDirectory=Join-Path $PSScriptRoot 'config'}
 if(-not $WorkDirectory){$WorkDirectory=Join-Path $project 'work\methods'}
@@ -78,21 +82,32 @@ New-Item -ItemType Directory -Path $out | Out-Null
 $roleOut=Join-Path $out 'baselines'
 New-Item -ItemType Directory -Path $roleOut | Out-Null
 $config=[ordered]@{project=$project; runId=$RunId; mode='SelectedMethods'; methods=$Methods; dataset='YUHS'; test=$Test;
+    extractionWorkers=$effectiveWorkers; requestedExtractionWorkers=$ExtractionWorkers;
     sites=$sites; careSites=$careSites; siteLabels=$siteLabels;
     study=$Study; scenario=$Scenario; blockSize=$BlockSize; alpha=$Alpha; tolerance=$Tolerance;
     patientLimits=$resolvedLimits; cacheDirectory=[IO.Path]::GetFullPath($CacheDirectory); rebuildData=[bool]$RebuildData;
     maxIterations=5000; priorVariance=1; smallQueryTimeout=$SmallQueryTimeoutSeconds;
+    connectionCheckTimeout=$ConnectionCheckTimeoutSeconds;
     dbQueryTimeout=$DbQueryTimeoutSeconds; runTimeout=$RunTimeoutSeconds; shutdownTimeout=$ShutdownTimeoutSeconds;
     output=$out; configDirectory=[IO.Path]::GetFullPath($ConfigDirectory);
     federatedOutput=(Join-Path (Join-Path $out 'federated-runtime') $RunId)}
 $configFile=Join-Path $out 'run.json'
 [IO.File]::WriteAllText($configFile,($config | ConvertTo-Json -Depth 5),(New-Object Text.UTF8Encoding($false)))
-$workers=@();$monitor=New-FederatedMonitor -RunDirectory $out -Roles @('baselines') -NoProgress:$NoProgress -Sites $sites -SiteLabels $siteLabels -StatusSeconds $StatusSeconds
+$roles=if($effectiveWorkers -gt 1){@($sites)+@('baselines')}else{@('baselines')}
+$workers=@();$monitor=New-FederatedMonitor -RunDirectory $out -Roles $roles -NoProgress:$NoProgress -Sites $sites -SiteLabels $siteLabels -StatusSeconds $StatusSeconds
+$dbWatchdog=New-FederatedDbWatchdog -RunDirectory $out -RunId $RunId -Sites $sites -TimeoutSeconds $ConnectionCheckTimeoutSeconds
 try {
     $limitText=($sites | ForEach-Object {$_+'='+$resolvedLimits[$_]}) -join ', '
-    Write-Host "Methods=$($Methods -join ','); Test=$Test; PatientLimits: $limitText (0=all); Sequential site extraction: $($sites -join ' -> '); RebuildData=$RebuildData. Output: $out"
+    Write-Host "Methods=$($Methods -join ','); Test=$Test; PatientLimits: $limitText (0=all); ExtractionWorkers=$effectiveWorkers; site queue: $($sites -join ' -> '); RebuildData=$RebuildData. Output: $out"
     $started=[DateTime]::UtcNow
     $deadline=$started.AddSeconds($RunTimeoutSeconds)
+    if($effectiveWorkers -gt 1) {
+        . (Join-Path $PSScriptRoot 'SitePreparation.ps1')
+        Invoke-FederatedSitePreparation -Runtime $runtime -Project $project -ConfigFile $configFile -RunDirectory $out `
+            -Sites $sites -MaxWorkers $effectiveWorkers -Deadline $deadline -ShutdownSeconds $ShutdownTimeoutSeconds `
+            -Monitor $monitor -Workers ([ref]$workers) -DbWatchdog $dbWatchdog
+    }
+    if([DateTime]::UtcNow -ge $deadline){throw 'No whole-run time remains for baseline fitting.'}
     $baselineWorker=Start-FederatedRWorker -Runtime $runtime -Script (Join-Path $PSScriptRoot 'run-baselines.R') `
         -Arguments @($configFile) -WorkingDirectory $project -LogPrefix (Join-Path $roleOut 'run') -Role baselines
     $workers+=,$baselineWorker
@@ -101,6 +116,7 @@ try {
     $marker=Join-Path $out 'baselines-complete.json'
     while($true){
         Update-FederatedMonitor $monitor $workers
+        Update-FederatedDbWatchdog $dbWatchdog $workers
         $worker=$baselineWorker;$worker.Process.Refresh()
         if($worker.Process.HasExited){Wait-FederatedWorkers $workers 10 $monitor;break}
         if(-not $finishedAt -and (Test-Path -LiteralPath $marker)){$finishedAt=[DateTime]::UtcNow}
@@ -155,6 +171,7 @@ try {
     Write-Host "PASS: selected methods complete. Results: $out" -ForegroundColor Green
 } catch {
     $failure=$_
+    [IO.File]::WriteAllText((Join-Path $out 'failure.txt'),$failure.Exception.Message,(New-Object Text.UTF8Encoding($false)))
     [IO.File]::WriteAllText((Join-Path $out 'run-status.json'),'{"state":"failed"}')
     if($workers.Count){
         try {

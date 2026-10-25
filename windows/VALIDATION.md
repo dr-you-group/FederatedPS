@@ -1,3 +1,30 @@
+## 0.0.10 bounded parallel extraction and DB startup watchdog
+
+Validated on 2026-10-26 with Linux R 4.3.3 and PowerShell 7.4.6:
+
+- Default extraction concurrency 3; explicit 1/2/3 and configured-site count cap.
+  Independent R/JDBC workers, same site limits, model barrier, exact checkpoint generation.
+- `Test-SitePreparation.ps1` uses real child processes to check overlap at 1/2/3,
+  early and late nonzero exits, invalid/missing/stale receipts, normal-exit gating,
+  whole-run/shutdown timeouts, a hung DB startup, and owned-process cleanup.
+- `Test-ConnectionWatchdog.ps1` checks the independent 180s startup deadline,
+  run/PID/site identity, sequential/parallel roles, optional incomplete phase files,
+  and exempting long clinical queries after validated startup. No progress monitor is required.
+- `test-runtime-policy.R` checks immutable startup/ready markers and a clock that does
+  not restart on a reconnect or a late disconnect. Existing TLS settings are preserved.
+- `test-db-diagnostics.R` checks JDBC substep events through query/fetch/cleanup,
+  scoped query/network timeout restoration, original error propagation and no row data in phase logs.
+- `test-data-cache.R` checks pinned prepared generations, missing/tampered/foreign
+  receipts, cache integrity and cache reuse across worker-count changes.
+- Routing tests cover all seven method selections and prohibit model execution
+  before successful preparation. Site monitor and read-only watcher tests cover parallel site roles.
+
+No actual Windows/HIWARE/SQL Server or native Cyclops integration ran here. The
+watchdog prevents an unbounded initial R/JDBC wait; it does not repair or diagnose
+an unavailable proxy/DB without target-host logs. Clinical SQL/eligibility and
+Cyclops versions are unchanged. Real speedup and peak memory remain unmeasured.
+Version/source fingerprints intentionally invalidate 0.0.9-and-earlier extraction caches.
+
 ## 0.0.9 SQL progress, per-site status and sequential extraction
 
 Validated on 2026-10-26 with Linux R 4.3.3 and PowerShell 7.4.6:

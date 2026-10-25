@@ -21,10 +21,40 @@ fp_configure_db_runtime <- function(config, out) {
     settingsPath <- file.path(config$configDirectory, settings)
     options(FederatedPs.progressContext = list(site = site, study = config$study, scenario = config$scenario,
         patientLimit = config$patientLimits[[site]],
+        extractionWorkers = config$extractionWorkers,
         connectionHash = unname(tools::md5sum(settingsPath)),
         package = as.character(utils::packageVersion("FederatedPs")),
         driver = as.character(utils::packageVersion("DatabaseConnector"))))
+    options(FederatedPs.dbStartupObserver = fp_db_startup_reporter(config, out, site))
     invisible(directory)
+}
+
+fp_db_startup_reporter <- function(config, out, site) {
+    started <- NULL
+    readyWritten <- FALSE
+    publish <- function(value, name) {
+        destination <- file.path(out, name)
+        jsonlite::write_json(value, paste0(destination, ".partial"), auto_unbox=TRUE, pretty=TRUE)
+        if (!file.rename(paste0(destination, ".partial"), destination))
+            stop("Cannot publish DB startup watchdog marker")
+    }
+    function(phase, ready = FALSE) {
+        # After successful checks the long clinical queries have their own
+        # timeout. A late disconnect must not restart the startup clock.
+        if (readyWritten) return(invisible(NULL))
+        now <- format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz="UTC")
+        if (is.null(started)) {
+            started <<- list(runId=config$runId, site=site, pid=Sys.getpid(), startedUtc=now)
+            publish(started, "db-startup-start.json")
+        }
+        jsonlite::write_json(c(started, list(phase=phase, updatedUtc=now)),
+            file.path(out,"db-startup-phase.json"),auto_unbox=TRUE,pretty=TRUE)
+        if (isTRUE(ready)) {
+            publish(c(started,list(state="checks-passed",completedUtc=now)), "db-startup-ready.json")
+            readyWritten <<- TRUE
+        }
+        invisible(NULL)
+    }
 }
 
 fp_prepare_db_connection <- function(details, config) {

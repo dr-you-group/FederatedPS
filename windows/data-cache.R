@@ -43,10 +43,16 @@ fp_cached_design_valid <- function(design, site, limit) {
     invisible(TRUE)
 }
 
-fp_cache_read <- function(directory, contract, site) {
+fp_cache_read <- function(directory, contract, site, entryName = NULL) {
+    if (!is.null(entryName) && (!is.character(entryName) || length(entryName) != 1L ||
+        is.na(entryName) || !grepl("^entry-[A-Za-z0-9]+[.]ready$", entryName)))
+        stop("Invalid prepared checkpoint name")
     parent <- file.path(directory, fp_object_md5(contract), site)
-    if (!dir.exists(parent)) return(NULL)
     entries <- list.files(parent, pattern="[.]ready$", full.names=TRUE)
+    if (!is.null(entryName)) {
+        entries <- entries[basename(entries) == entryName]
+        if (length(entries) != 1L) stop("Prepared extraction checkpoint not found")
+    }
     if (!length(entries)) return(NULL)
     entry <- entries[order(file.info(entries)$mtime, decreasing=TRUE)][1]
     tryCatch({
@@ -59,6 +65,23 @@ fp_cache_read <- function(directory, contract, site) {
         list(design=design,path=entry)
     }, error=function(e) stop("Completed cache cannot be reused: ",conditionMessage(e),
         ". Run with -RebuildData to extract afresh. Cache: ",entry))
+}
+
+# A parallel worker pins the exact completed generation. The model process
+# must not pick a newer cache from another run or repeat extraction on failure.
+fp_prepared_cache_read <- function(config, contract, site) {
+    receipt <- jsonlite::fromJSON(file.path(config$output, site, "preparation-complete.json"))
+    if (!identical(receipt$runId, config$runId) || !identical(receipt$site, site) ||
+        !identical(receipt$state, "extraction-complete") ||
+        !is.logical(receipt$reused) || length(receipt$reused) != 1L || is.na(receipt$reused) ||
+        !is.character(receipt$entryName) || length(receipt$entryName) != 1L || is.na(receipt$entryName))
+        stop("Invalid preparation receipt")
+    cached <- fp_cache_read(config$cacheDirectory, contract, site, entryName=receipt$entryName)
+    if (is.null(cached)) stop("Prepared data missing; refusing a second database extraction")
+    if (!identical(as.integer(receipt$patients), as.integer(nrow(cached$design$x))))
+        stop("Prepared patient count differs from completed cache")
+    cached$reused <- receipt$reused
+    cached
 }
 
 fp_cache_write <- function(directory, contract, site, design) {

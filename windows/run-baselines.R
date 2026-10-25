@@ -1,14 +1,18 @@
 args <- commandArgs(trailingOnly = TRUE)
-stopifnot(length(args) == 1L)
+stopifnot(length(args) %in% 1:2)
 config <- jsonlite::fromJSON(args[1])
+prepareSite <- if (length(args) == 2L) args[2] else NULL
+if (!is.null(prepareSite) && !prepareSite %in% config$sites) stop("Unknown preparation site")
 source(file.path(config$project, "windows", "common.R"))
 source(file.path(config$project, "windows", "progress.R"))
 source(file.path(config$project, "windows", "db-runtime.R"))
 source(file.path(config$project, "windows", "baseline-models.R"))
 source(file.path(config$project, "windows", "data-cache.R"))
 context <- new.env(); context$label <- "baseline startup"
-context$site <- ""; context$state <- "startup"
-observer <- fp_start_progress(file.path(config$output, "baselines"), "baselines",
+context$site <- if (is.null(prepareSite)) "" else prepareSite
+context$state <- "starting"
+role <- if (is.null(prepareSite)) "baselines" else prepareSite
+observer <- fp_start_progress(file.path(config$output, role), role,
     historyDirectory = file.path(config$project, "work", "progress-history"))
 options(FederatedPs.progress = function(event) {
     event$detail <- paste0(context$label, ": ", event$detail)
@@ -66,6 +70,7 @@ extract_site <- function(site) {
 }
 
 main <- function() {
+    progress("startup", if (is.null(prepareSite)) "Starting selected models" else "Starting isolated site extraction worker")
     fp_verify_runtime(config$project)
     fp_check_names(config$runId, config$sites)
     fp_check_yuhs_sites(config)
@@ -81,13 +86,17 @@ main <- function() {
     cat("PS are in-sample; fixed Laplace variance", config$priorVariance, "; no cross-validation.\n")
     cacheRecords <- list()
     designs <- list()
-    for (site in config$sites) {
+    for (site in if (is.null(prepareSite)) config$sites else prepareSite) {
         contract <- fp_data_contract(config,site=site)
-        cached <- if (isTRUE(config$rebuildData)) NULL else fp_cache_read(config$cacheDirectory,contract,site)
+        prepared <- is.null(prepareSite) && !is.null(config$extractionWorkers) && config$extractionWorkers > 1L
+        if (prepared) {
+            cached <- fp_prepared_cache_read(config,contract,site)
+        } else cached <- if (isTRUE(config$rebuildData)) NULL else fp_cache_read(config$cacheDirectory,contract,site)
         if (!is.null(cached)) {
             context$label <- paste("reuse",site)
-            context$site <- site; context$state <- "data-ready (cache)"
-            progress("cache-hit", "Verified completed extraction; skipping DB, CohortMethod and covariate extraction")
+            context$site <- site; context$state <- if (prepared) "data-ready (prepared)" else "data-ready (cache)"
+            progress("cache-hit", if (prepared) "Loading the exact checkpoint produced by the site worker" else
+                "Verified completed extraction; skipping DB, CohortMethod and covariate extraction")
             designs[[site]] <- cached$design
             path <- cached$path
             cat("CACHE HIT:",site,"; patients=",nrow(designs[[site]]$x),";",path,"\n")
@@ -98,10 +107,20 @@ main <- function() {
             progress("checkpoint",paste(site,"complete: population and covariates saved for reuse"))
             cat("CACHE SAVED:",site,";",path,"\n")
         }
-        cacheRecords[[site]] <- list(site=site,reused=!is.null(cached),path=path,patients=nrow(designs[[site]]$x))
-        jsonlite::write_json(cacheRecords,file.path(config$output,"data-cache.json"),auto_unbox=TRUE,pretty=TRUE)
+        cacheRecords[[site]] <- list(site=site,reused=if(prepared) cached$reused else !is.null(cached),path=path,patients=nrow(designs[[site]]$x))
+        cacheFile <- if (is.null(prepareSite)) "data-cache.json" else file.path(role,"data-cache.json")
+        jsonlite::write_json(cacheRecords,file.path(config$output,cacheFile),auto_unbox=TRUE,pretty=TRUE)
         flush(stdout())
         invisible(gc())
+    }
+    if (!is.null(prepareSite)) {
+        receipt <- list(runId=config$runId,site=prepareSite,state="extraction-complete",
+            entryName=basename(path),reused=!is.null(cached),patients=nrow(designs[[prepareSite]]$x))
+        receiptPath <- file.path(config$output,role,"preparation-complete.json")
+        jsonlite::write_json(receipt,paste0(receiptPath,".partial"),auto_unbox=TRUE,pretty=TRUE)
+        if (!file.rename(paste0(receiptPath,".partial"),receiptPath)) stop("Cannot finalize preparation receipt")
+        progress("exiting", "Site preparation complete; requesting normal process exit")
+        return(invisible(NULL))
     }
     fp_baseline_validate_sites(designs)
     if ("federated" %in% config$methods) {

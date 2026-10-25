@@ -281,18 +281,23 @@ function Update-FederatedMonitor {
             }
             $role=if($null -ne $site.Event -and $site.Event.PSObject.Properties['role']){$site.Event.role}else{$site.Id}
             $owner=@($Monitor.States | Where-Object {$_.Role -ceq $role})
-            $currentOwner=$owner.Count -and $null -ne $owner[0].Event -and
+            $dedicatedOwner=$owner.Count -and $owner[0].Role -ceq $site.Id
+            $currentOwner=$dedicatedOwner -or ($owner.Count -and $null -ne $owner[0].Event -and
                 $owner[0].Event.PSObject.Properties['siteId'] -and [string]$owner[0].Event.siteId -ceq $site.Id -and
-                $site.State -notmatch '^(data-ready|local-complete)'
+                $site.State -notmatch '^(data-ready|local-complete)')
+            if($currentOwner -and $null -ne $owner[0].ObservedExitCode -and $owner[0].ObservedExitCode -ne 0) {
+                $site.State='failed/stopped'
+            }
             $alive=$currentOwner -and $owner[0].ProcessState.StartsWith('alive')
             $fresh=$null -ne $site.Event -and ([DateTime]::UtcNow-(ConvertTo-FederatedUtc $site.Event.timestamp)).TotalSeconds -lt 10
             $siteView=Get-FederatedProgressDisplay $site.Event ($alive -and $fresh) ([DateTime]::UtcNow) $alive
-            $siteText=if($null -eq $site.Event){'queued: extraction has not started'}else{"$($site.State) | $($siteView.Text)"}
+            $pending=if($site.State -eq 'failed/stopped'){'failed/stopped before a site event'}elseif($currentOwner -and $alive){'starting: waiting for first site event'}elseif($Final){'not started: run ended'}else{'queued: extraction has not started'}
+            $siteText=if($null -eq $site.Event){$pending}else{"$($site.State) | $($siteView.Text)"}
             if($currentOwner){$siteText += " | worker $($owner[0].ProcessState); CPU(core)=$($owner[0].Cpu)"}
             $caption="site_id=$($site.Id) ($($site.Label))"
             if($statusDue){Write-FederatedMonitorLine $Monitor "[$caption] $siteText"}
             if(-not $Monitor.NoProgress) {
-                $siteStatus=if($null -eq $site.Event){'queued: extraction has not started'}else{"$($site.State) | $($siteView.Status)"}
+                $siteStatus=if($null -eq $site.Event){$pending}else{"$($site.State) | $($siteView.Status)"}
                 Write-Progress -Id (200+$siteIndex) -ParentId 100 -Activity $caption -Status $siteStatus -CurrentOperation $siteView.Operation `
                     -PercentComplete $siteView.Percent -SecondsRemaining $siteView.Eta
             }

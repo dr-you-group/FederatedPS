@@ -84,6 +84,17 @@ stopifnot(!inherits(error, "fps_small_query_error"))
 .fpsJdbcSmallQuery <- real_small_query
 options(FederatedPs.smallQueryTimeoutSeconds = NULL)
 
+# Substeps are visible even when progress logging is disabled, and disclose no
+# SQL literal/row value. They also expose hangs during JDBC cleanup/restoration.
+phases <- character()
+options(FederatedPs.progress=NULL,FederatedPs.dbStartupObserver=function(phase,ready) phases <<- c(phases,phase))
+java <- make_java(rows)
+invisible(.fpsJdbcSmallQuery("connection",sql,columns,60,java$call,"null-executor"))
+stopifnot(any(grepl("JDBC executeQuery",phases)),any(grepl("JDBC next",phases)),
+    any(grepl("resource cleanup",phases)),grepl("setNetworkTimeout",tail(phases,1)),
+    !any(grepl("Synthetic Hospital|SELECT|CDM.CARE_SITE",phases)))
+options(FederatedPs.dbStartupObserver=NULL)
+
 directory <- tempfile("fps-diagnostics-")
 events <- list()
 options(FederatedPs.sqlDiagnosticsDirectory = directory, FederatedPs.dbOperationIndex = 0L,

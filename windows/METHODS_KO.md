@@ -1,7 +1,8 @@
-# v0.0.9 업데이트
+# v0.0.10 업데이트
 
-기관별 진행 표시와 순차 추출은 [PROGRESS_PERFORMANCE_KO.md](PROGRESS_PERFORMANCE_KO.md)를 참조하십시오.
-`-StatusSeconds 10`으로 10초 간격 상태 기록을 선택할 수 있습니다.
+기본 3개 기관 병렬 추출과 기관별 진행 표시는 [PROGRESS_PERFORMANCE_KO.md](PROGRESS_PERFORMANCE_KO.md)를 참조하십시오.
+`-ExtractionWorkers` 기본값은 3이며 1 또는 2로 낮출 수 있습니다.
+`-StatusSeconds 10`으로 10초 간격 상태 기록을 선택할 수 있습니다. 이 절이 아래 0.0.8 안내보다 우선합니다.
 
 # YUHS 실행 방법·환자 제한·추출 재사용 (0.0.8)
 

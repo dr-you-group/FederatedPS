@@ -7,7 +7,10 @@ $ErrorActionPreference='Stop'
 $RunDirectory=(Resolve-Path -LiteralPath $RunDirectory).Path
 $config=Get-Content -LiteralPath (Join-Path $RunDirectory 'run.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $selected=$config.PSObject.Properties['mode'] -and $config.mode -eq 'SelectedMethods'
-$roles=if($selected){@('baselines','verification')}else{@('aggregator')+@($config.sites)+@('verification')}
+$roles=if($selected){
+    if($config.PSObject.Properties['extractionWorkers'] -and $config.extractionWorkers -gt 1){@($config.sites)+@('baselines','verification')}
+    else{@('baselines','verification')}
+}else{@('aggregator')+@($config.sites)+@('verification')}
 foreach($role in $roles) { if($role -notmatch '^[A-Za-z0-9]+$'){throw 'Invalid role in run configuration.'} }
 $siteOptions=@{}
 if($selected){$siteOptions['Sites']=@($config.sites);$siteOptions['SiteLabels']=$config.siteLabels}

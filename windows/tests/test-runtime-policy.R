@@ -1,6 +1,19 @@
 # Base-R policy regression: TLS preservation, timeout routing and restricted retry.
 source("windows/db-runtime.R")
 source("R/Pda.R")
+out <- tempfile();dir.create(out)
+report <- fp_db_startup_reporter(list(runId="fixtureRun"),out,"17")
+report("Opening JDBC database connection")
+start <- jsonlite::fromJSON(file.path(out,"db-startup-start.json"))
+report("Connection self-check: JDBC executeQuery")
+stopifnot(identical(start,jsonlite::fromJSON(file.path(out,"db-startup-start.json"))),
+    start$pid==Sys.getpid(),start$site=="17",!file.exists(file.path(out,"db-startup-ready.json")))
+report("Connection self-check and CARE_SITE validation passed",TRUE)
+ready <- jsonlite::fromJSON(file.path(out,"db-startup-ready.json"))
+stopifnot(ready$state=="checks-passed",identical(ready$startedUtc,start$startedUtc))
+report("Closing database connection")
+stopifnot(identical(ready,jsonlite::fromJSON(file.path(out,"db-startup-ready.json"))))
+unlink(out,recursive=TRUE)
 d <- list(dbms = "sql server", extraSettings =
     "databaseName=fixture;encrypt=false;trustServerCertificate=false;queryTimeout=9")
 prepared <- fp_prepare_db_connection(d, list(dbQueryTimeout = 120))

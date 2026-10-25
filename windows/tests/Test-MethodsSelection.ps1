@@ -10,14 +10,16 @@ param($Mode,$Dataset,$Methods,[bool]$Test=$true,$BlockSize,$Alpha)
 [pscustomobject]@{mode=$Mode;dataset=$Dataset;methods=$Methods;test=$Test;block=$BlockSize;alpha=$Alpha}
 '@ | Set-Content (Join-Path $temp 'Run-FederatedPS.ps1')
     @'
-param($Methods,[bool]$Test=$true,$BlockSize,$Alpha,$PatientLimit,$PatientLimits,$CacheDirectory,[switch]$RebuildData,$StatusSeconds)
-[pscustomobject]@{mode='SelectedMethods';methods=$Methods;test=$Test;block=$BlockSize;alpha=$Alpha;limit=$PatientLimit;limits=$PatientLimits;cache=$CacheDirectory;rebuild=[bool]$RebuildData;status=$StatusSeconds}
+param($Methods,[bool]$Test=$true,$BlockSize,$Alpha,$PatientLimit,$PatientLimits,$CacheDirectory,[switch]$RebuildData,$StatusSeconds,$ExtractionWorkers,$ConnectionCheckTimeoutSeconds)
+[pscustomobject]@{mode='SelectedMethods';methods=$Methods;test=$Test;block=$BlockSize;alpha=$Alpha;limit=$PatientLimit;limits=$PatientLimits;cache=$CacheDirectory;rebuild=[bool]$RebuildData;status=$StatusSeconds;workers=$ExtractionWorkers;connectionTimeout=$ConnectionCheckTimeoutSeconds}
 '@ | Set-Content (Join-Path $temp 'Run-YUHS-Methods.ps1')
     $run=Join-Path $temp 'Run-YUHS.ps1'
     $default=& $run
+    if($default.workers -ne 3){throw 'Default parallel worker count was not forwarded'}
     if($default.mode -ne 'SelectedMethods' -or -not $default.test -or ($default.methods -join ',') -ne 'federated'){throw 'Default selection broken'}
     foreach($selection in @('local-only','pooled','federated','local-only,pooled','local-only,federated','pooled,federated','local-only,pooled,federated')){
-        $m=$selection.Split(',');$r=& $run -Methods $m -Test $false -BlockSize 4 -Alpha 0.5 -PatientLimit 200 -PatientLimits @{2=100;3=300} -CacheDirectory 'fixture-cache' -RebuildData -StatusSeconds 10
+        $m=$selection.Split(',');$r=& $run -Methods $m -Test $false -BlockSize 4 -Alpha 0.5 -PatientLimit 200 -PatientLimits @{2=100;3=300} -CacheDirectory 'fixture-cache' -RebuildData -StatusSeconds 10 -ExtractionWorkers 3
+        if($r.workers -ne 3){throw 'Parallel worker count lost'}
         if($r.status -ne 10){throw 'Progress option lost'}
         if($r.test -or $r.block -ne 4 -or $r.alpha -ne 0.5){throw 'Settings lost'}
         if($r.mode -ne 'SelectedMethods' -or ($r.methods -join ',') -ne $selection){throw 'Bad selection dispatch'}
@@ -25,6 +27,12 @@ param($Methods,[bool]$Test=$true,$BlockSize,$Alpha,$PatientLimit,$PatientLimits,
     }
     $r=& $run -Methods POOLED,LOCAL-ONLY
     if(($r.methods -join ',') -cne 'pooled,local-only'){throw 'Case normalization failed'}
+    if((& $run -ExtractionWorkers 1).workers -ne 1){throw 'Sequential fallback lost'}
+    if((& $run -ConnectionCheckTimeoutSeconds 240).connectionTimeout -ne 240){throw 'Startup timeout lost'}
+    foreach($workers in @(0,4)){
+        $caught=$false;try{& $run -ExtractionWorkers $workers | Out-Null}catch{$caught=$true}
+        if(-not $caught){throw 'Invalid concurrency accepted'}
+    }
     foreach($bad in @(@(),@('other'),@('pooled','POOLED'))){
         $caught=$false;try{& $run -Methods $bad | Out-Null}catch{$caught=$true}
         if(-not $caught){throw 'Invalid selection accepted'}

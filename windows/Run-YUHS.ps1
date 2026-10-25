@@ -7,6 +7,7 @@ param(
     [string]$CacheDirectory='', [switch]$RebuildData,
     [switch]$NoProgress,
     [ValidateRange(1,3600)][int]$StatusSeconds = 15,
+    [ValidateRange(1,3)][int]$ExtractionWorkers = 3,
     [bool]$Test = $true,
     [string]$Study = 'ppi',
     [ValidateSet('default','studySpecific')][string]$Scenario = 'default',
@@ -19,6 +20,7 @@ param(
     [ValidateRange(1,2147483647)][int]$ExchangeTimeoutSeconds = 3600,
     [ValidateRange(1,2147483647)][int]$InitialTimeoutSeconds = 21600,
     [ValidateRange(1,86400)][int]$SmallQueryTimeoutSeconds = 60,
+    [ValidateRange(30,86400)][int]$ConnectionCheckTimeoutSeconds = 180,
     [ValidateRange(1,2147483647)][int]$DbQueryTimeoutSeconds = 7200,
     [ValidateRange(1,2147483647)][int]$RunTimeoutSeconds = 86400
 )
@@ -26,6 +28,7 @@ $ErrorActionPreference = 'Stop'
 # Pass the effective default explicitly: PSBoundParameters omits defaults.
 $forward = @{} + $PSBoundParameters
 $forward['Test'] = $Test
+$forward['ExtractionWorkers'] = $ExtractionWorkers
 if(-not $Methods.Count -or @($Methods | Sort-Object -Unique).Count -ne $Methods.Count){throw 'Select one or more distinct Methods.'}
 $Methods=@($Methods | ForEach-Object { $_.ToLowerInvariant() })
 $forward['Methods']=$Methods

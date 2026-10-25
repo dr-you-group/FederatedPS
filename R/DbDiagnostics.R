@@ -62,6 +62,14 @@
     as.integer(value)
 }
 
+# The Windows process supervisor observes a separate startup marker. Keep this
+# independent of the optional progress observer, which may disable itself.
+.fpsDbStartupState <- function(phase, ready = FALSE) {
+    observer <- getOption("FederatedPs.dbStartupObserver")
+    if (is.function(observer)) observer(phase, ready)
+    invisible(NULL)
+}
+
 # Standard JDBC interfaces only. This intentionally reads at most two small
 # rows, sufficient to validate SELECT 1 / @@SPID and uniqueness of CARE_SITE.
 # Network timeout is scoped to this operation and restored before bulk work.
@@ -69,8 +77,15 @@
                                jcall = rJava::.jcall,
                                nullExecutor = rJava::.jnull("java/util/concurrent/Executor")) {
     timeout <- .fpsSmallQueryTimeout(timeout)
+    label <- if (identical(names(columns), c("ok", "sessionId"))) "Connection self-check" else "CARE_SITE lookup"
+    call <- function(object, type, method, ...) {
+        phase <- paste0(label, ": JDBC ", method,
+            if (identical(method, "close")) " (resource cleanup)" else "")
+        .fpsDbStartupState(phase)
+        .fpsDbOperation(phase, jcall(object, type, method, ...), completed = 0)
+    }
     statement <- result <- NULL
-    originalNetworkTimeout <- jcall(jConnection, "I", "getNetworkTimeout")
+    originalNetworkTimeout <- call(jConnection, "I", "getNetworkTimeout")
     changedNetworkTimeout <- FALSE
     completed <- FALSE
     on.exit({
@@ -78,27 +93,27 @@
         cleanup <- function(expr) tryCatch(force(expr), error = function(e) {
             if (is.null(cleanupError)) cleanupError <<- e
         })
-        if (!is.null(result)) cleanup(jcall(result, "V", "close"))
-        if (!is.null(statement)) cleanup(jcall(statement, "V", "close"))
+        if (!is.null(result)) cleanup(call(result, "V", "close"))
+        if (!is.null(statement)) cleanup(call(statement, "V", "close"))
         if (changedNetworkTimeout)
-            cleanup(jcall(jConnection, "V", "setNetworkTimeout", nullExecutor,
+            cleanup(call(jConnection, "V", "setNetworkTimeout", nullExecutor,
                           as.integer(originalNetworkTimeout)))
         # Never leave a short socket timeout on a healthy connection used for
         # bulk extraction. On failure preserve the original query exception.
         if (completed && !is.null(cleanupError)) stop(cleanupError)
     })
-    jcall(jConnection, "V", "setNetworkTimeout", nullExecutor, as.integer((timeout + 15L) * 1000L))
+    call(jConnection, "V", "setNetworkTimeout", nullExecutor, as.integer((timeout + 15L) * 1000L))
     changedNetworkTimeout <- TRUE
-    statement <- jcall(jConnection, "Ljava/sql/Statement;", "createStatement")
-    jcall(statement, "V", "setQueryTimeout", timeout)
-    jcall(statement, "V", "setMaxRows", 2L)
-    result <- jcall(statement, "Ljava/sql/ResultSet;", "executeQuery", sql)
+    statement <- call(jConnection, "Ljava/sql/Statement;", "createStatement")
+    call(statement, "V", "setQueryTimeout", timeout)
+    call(statement, "V", "setMaxRows", 2L)
+    result <- call(statement, "Ljava/sql/ResultSet;", "executeQuery", sql)
     values <- lapply(columns, function(type) if (type == "integer") integer() else character())
-    while (isTRUE(jcall(result, "Z", "next"))) {
+    while (isTRUE(call(result, "Z", "next"))) {
         for (i in seq_along(columns)) {
-            value <- if (columns[[i]] == "integer") jcall(result, "I", "getInt", as.integer(i)) else
-                jcall(result, "S", "getString", as.integer(i))
-            if (isTRUE(jcall(result, "Z", "wasNull"))) value <- if (columns[[i]] == "integer") NA_integer_ else NA_character_
+            value <- if (columns[[i]] == "integer") call(result, "I", "getInt", as.integer(i)) else
+                call(result, "S", "getString", as.integer(i))
+            if (isTRUE(call(result, "Z", "wasNull"))) value <- if (columns[[i]] == "integer") NA_integer_ else NA_character_
             values[[i]] <- c(values[[i]], value)
         }
         # JDBC setMaxRows enforces the bound; this also guards unusual drivers.
