@@ -279,3 +279,22 @@ CKKS/Python 실험 등의 추가 의존성은 이번 기본 오프라인 런타�
 타임아웃과 작업 정리를 검증합니다. `windows/tests/test-validation.R`은 의존성 없는
 식별자/블록 패킷/설계 행렬 입력 검증입니다. Windows 서버의 실제 설치와 합성 연합 적합은
 위 2~3단계로 확인하십시오. 실제 CDM 연결/추출/분석 결과는 해당 서버에서 검증해야 합니다.
+
+## Windows PowerShell 5.1에서 `failed (exit )`가 나왔던 경우
+
+2026-10-25 실행기 수정에서 자식 프로세스를 `System.Diagnostics.Process`로 직접
+시작해 종료 코드를 유지하고 표준 출력/오류를 동시에 기록하도록 변경했습니다.
+기존 `Start-Process`의 빈 ExitCode 문제를 피하며, 종료 코드가 없으면 명확한 오류로
+중단합니다. 성공으로 간주하거나 임의로 0을 넣지 않습니다.
+
+이미 FederatedPs 0.0.5를 설치한 서버에서는 실행기 패치만 적용하면 됩니다.
+R/Rtools/Java/Cyclops/FederatedPs를 다시 설치하거나 DB 설정을 바꿀 필요가 없습니다.
+
+```powershell
+.\windows\tests\Test-Launcher.ps1
+.\windows\Run-YUHS.ps1 -Test $true
+```
+
+수정 후 숫자가 있는 `failed (exit 1)` 등의 메시지가 나오면 해당 역할의
+`run.stderr.log`와 `run.stdout.log`를 확인하십시오. 이는 실제 자식 프로세스의 실패이며
+무시하면 안 됩니다. `Test=true` 실행은 HIWARE 로그인 및 실제 DB 접속이 필요 없습니다.

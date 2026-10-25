@@ -87,3 +87,22 @@ Synthetic YUHS sample update (2026-10-25):
 ```
 
 No real YUHS DB, HIWARE session or credentials were used during development.
+
+Windows PowerShell 5.1 exit-code hotfix (2026-10-25):
+
+- User-provided target-host output showed both the launcher roundtrip test and
+  an aggregator reported `failed (exit )` despite passing R/runtime preflight.
+  The old Start-Process/redirected-stream path can lose the native process
+  handle on Windows PowerShell 5.1 (PowerShell/PowerShell issue #5421).
+- Start workers using System.Diagnostics.Process directly; retain its original
+  handle, drain stdout/stderr concurrently through .NET tasks, and flush logs
+  before interpreting the actual exit code. Missing codes remain failures
+  with an explicit indeterminate-status message; they are never coerced to 0.
+- Test-Launcher now covers children that already exited before waiting, exact
+  exit codes 0/7/23, an intentionally missing code, and 256 KiB on each output
+  pipe, in addition to argument quoting, timeout and owned-process cleanup.
+- Executed these child-process tests on Linux PowerShell 7.4.6; Windows
+  PowerShell 5.1 acceptance and the user's R role stderr remain unobserved.
+  The screenshot alone does not establish that the R aggregator succeeded.
+- This is a launcher-only hotfix. FederatedPs remains 0.0.5 and no R package
+  or dependency reinstallation is needed when updating the previous bundle.

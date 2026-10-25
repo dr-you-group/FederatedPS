@@ -38,6 +38,47 @@ try {
     if ([IO.File]::ReadAllText($output) -cne $value) { throw 'Native argument roundtrip failed.' }
 } finally { Stop-FederatedWorkers $workers }
 
+# Regress the Windows PowerShell 5.1 empty ExitCode failure. Complete short
+# children before asking the launcher to wait, and require actual integer codes.
+foreach ($code in @(0, 7, 0, 23)) {
+    $workers = @()
+    try {
+        $workers += Start-FederatedWorker $executable @('-NoProfile','-File',$child,$output,'fast',[string]$code) $root (Join-Path $root "fast$code") "fast$code"
+        if (-not $workers[0].Process.WaitForExit(30000)) { throw 'Fast worker did not exit.' }
+        $actual = $workers[0].Process.ExitCode
+        if ($null -eq $actual -or $actual -ne $code) { throw "Lost exit code: expected $code, got '$actual'." }
+        if ($code -eq 0) { Wait-FederatedWorkers $workers 30 }
+        else { Assert-Throws { Wait-FederatedWorkers $workers 30 } "failed.*exit $code" }
+    } finally { Stop-FederatedWorkers $workers }
+}
+
+# Large stdout and stderr must drain concurrently without truncation/deadlock.
+$noisy = Join-Path $root 'noisy.ps1'
+@'
+$text = 'x' * 262144
+[Console]::Out.Write($text)
+[Console]::Error.Write($text)
+exit 0
+'@ | Set-Content -LiteralPath $noisy -Encoding UTF8
+$workers = @()
+try {
+    $prefix = Join-Path $root 'noisy'
+    $workers += Start-FederatedWorker $executable @('-NoProfile','-File',$noisy) $root $prefix 'noisy'
+    Wait-FederatedWorkers $workers 30
+    foreach ($stream in @('stdout','stderr')) {
+        if (([IO.File]::ReadAllText("$prefix.$stream.log")).Length -ne 262144) { throw "Truncated $stream log." }
+    }
+} finally { Stop-FederatedWorkers $workers }
+
+# A missing code is indeterminate, never success and never a fabricated zero.
+$fakeProcess = [pscustomobject]@{ HasExited = $true; ExitCode = $null }
+$fakeProcess | Add-Member ScriptMethod Refresh {}
+$fakeProcess | Add-Member ScriptMethod WaitForExit {}
+$done = [System.Threading.Tasks.Task]::FromResult(0)
+$fake = [pscustomobject]@{ Role = 'missing'; Process = $fakeProcess; LogPrefix = 'missing'; Completed = $false;
+    StdoutTask = $done; StderrTask = $done; StdoutStream = [IO.Stream]::Null; StderrStream = [IO.Stream]::Null }
+Assert-Throws { Wait-FederatedWorkers @($fake) 1 } 'No exit code.*Completion cannot be verified'
+
 $workers = @()
 try {
     $workers += Start-FederatedWorker $executable @('-NoProfile','-File',$child,$output,'slow','0','30') $root (Join-Path $root 'slow') 'slow'
@@ -53,4 +94,4 @@ try {
     $workers += Start-FederatedWorker $executable @('-NoProfile','-File',$child,$output,'slow','0','30') $root (Join-Path $root 'timeout') 'timeout'
     Assert-Throws { Wait-FederatedWorkers $workers 1 } 'timed out'
 } finally { Stop-FederatedWorkers $workers }
-Write-Host "PASS: identifiers, argument roundtrip, nonzero exits, owned-worker cleanup and timeout. Logs: $root"
+Write-Host "PASS: identifiers, argument roundtrip, fast/zero/nonzero/missing exit codes, dual-pipe logs, cleanup and timeout. Logs: $root"

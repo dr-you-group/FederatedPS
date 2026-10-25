@@ -72,16 +72,44 @@ function ConvertTo-NativeArgument([AllowEmptyString()][string]$Value) {
 function Start-FederatedWorker {
     param([string]$Executable, [string[]]$Arguments, [string]$WorkingDirectory,
           [string]$LogPrefix, [string]$Role)
-    $parameters = @{
-        FilePath = $Executable
-        ArgumentList = (($Arguments | ForEach-Object { ConvertTo-NativeArgument $_ }) -join ' ')
-        WorkingDirectory = $WorkingDirectory
-        RedirectStandardOutput = "$LogPrefix.stdout.log"
-        RedirectStandardError = "$LogPrefix.stderr.log"
-        PassThru = $true
+    # Windows PowerShell 5.1 Start-Process + redirected streams can return a
+    # Process without its native handle, so ExitCode later reads as $null.
+    # Starting through System.Diagnostics.Process retains the original handle,
+    # including for children that finish before this function returns.
+    $process = New-Object System.Diagnostics.Process
+    $info = New-Object System.Diagnostics.ProcessStartInfo
+    $info.FileName = $Executable
+    $info.Arguments = (($Arguments | ForEach-Object { ConvertTo-NativeArgument $_ }) -join ' ')
+    $info.WorkingDirectory = $WorkingDirectory
+    $info.UseShellExecute = $false
+    $info.CreateNoWindow = $true
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    $process.StartInfo = $info
+    $stdout = $null; $stderr = $null; $started = $false
+    try {
+        $stdout = [IO.File]::Open("$LogPrefix.stdout.log", [IO.FileMode]::Create,
+            [IO.FileAccess]::Write, [IO.FileShare]::Read)
+        $stderr = [IO.File]::Open("$LogPrefix.stderr.log", [IO.FileMode]::Create,
+            [IO.FileAccess]::Write, [IO.FileShare]::Read)
+        $started = $process.Start()
+        if (-not $started) { throw "Could not start role $Role." }
+        # Drain both pipes concurrently using .NET tasks; no PowerShell event
+        # handlers/runspaces and no pipe-buffer deadlocks on verbose R builds.
+        $stdoutTask = $process.StandardOutput.BaseStream.CopyToAsync($stdout)
+        $stderrTask = $process.StandardError.BaseStream.CopyToAsync($stderr)
+        [pscustomobject]@{
+            Role = $Role; Process = $process; LogPrefix = $LogPrefix
+            StdoutStream = $stdout; StderrStream = $stderr
+            StdoutTask = $stdoutTask; StderrTask = $stderrTask; Completed = $false
+        }
+    } catch {
+        if ($started -and -not $process.HasExited) { $process.Kill(); $process.WaitForExit() }
+        if ($null -ne $stdout) { $stdout.Dispose() }
+        if ($null -ne $stderr) { $stderr.Dispose() }
+        $process.Dispose()
+        throw
     }
-    if ($env:OS -eq 'Windows_NT') { $parameters.WindowStyle = 'Hidden' }
-    [pscustomobject]@{ Role = $Role; Process = (Start-Process @parameters); LogPrefix = $LogPrefix }
 }
 
 function Wait-FederatedWorkers([object[]]$Workers, [int]$TimeoutSeconds) {
@@ -89,12 +117,25 @@ function Wait-FederatedWorkers([object[]]$Workers, [int]$TimeoutSeconds) {
     while ($true) {
         $active = 0
         foreach ($worker in $Workers) {
+            if ($worker.Completed) { continue }
+            foreach ($task in @($worker.StdoutTask, $worker.StderrTask)) {
+                if ($task.IsFaulted -or $task.IsCanceled) { [void]$task.GetAwaiter().GetResult() }
+            }
             $worker.Process.Refresh()
-            if ($worker.Process.HasExited) {
+            if ($worker.Process.HasExited -and $worker.StdoutTask.IsCompleted -and $worker.StderrTask.IsCompleted) {
                 $worker.Process.WaitForExit()
-                if ($worker.Process.ExitCode -ne 0) {
-                    throw "Role $($worker.Role) failed (exit $($worker.Process.ExitCode)). See $($worker.LogPrefix).stderr.log"
+                [void]$worker.StdoutTask.GetAwaiter().GetResult()
+                [void]$worker.StderrTask.GetAwaiter().GetResult()
+                $worker.StdoutStream.Flush()
+                $worker.StderrStream.Flush()
+                $exitCode = $worker.Process.ExitCode
+                if ($null -eq $exitCode) {
+                    throw "No exit code was available for role $($worker.Role). Completion cannot be verified. See $($worker.LogPrefix).stderr.log"
                 }
+                if ($exitCode -ne 0) {
+                    throw "Role $($worker.Role) failed (exit $exitCode). See $($worker.LogPrefix).stderr.log"
+                }
+                $worker.Completed = $true
             } else { $active++ }
         }
         if ($active -eq 0) { break }
@@ -105,7 +146,22 @@ function Wait-FederatedWorkers([object[]]$Workers, [int]$TimeoutSeconds) {
 
 function Stop-FederatedWorkers([object[]]$Workers) {
     foreach ($worker in $Workers) {
-        if (-not $worker.Process.HasExited) { $worker.Process.Kill(); $worker.Process.WaitForExit() }
-        $worker.Process.Dispose()
+        try {
+            if (-not $worker.Process.HasExited) { $worker.Process.Kill(); $worker.Process.WaitForExit() }
+            # Bound pipe cleanup as a descendant could still hold an inherited
+            # pipe open. Do not let cleanup hide the original role/timeout error.
+            $tasks = [System.Threading.Tasks.Task[]]@($worker.StdoutTask, $worker.StderrTask)
+            if (-not [System.Threading.Tasks.Task]::WaitAll($tasks, 5000)) {
+                Write-Warning "Log drain did not finish for role $($worker.Role)."
+            }
+        } catch {
+            Write-Warning "Cleanup for role $($worker.Role): $($_.Exception.Message)"
+        } finally {
+            $worker.Process.StandardOutput.Dispose()
+            $worker.Process.StandardError.Dispose()
+            $worker.StdoutStream.Dispose()
+            $worker.StderrStream.Dispose()
+            $worker.Process.Dispose()
+        }
     }
 }
