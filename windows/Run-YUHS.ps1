@@ -1,6 +1,7 @@
 #Requires -Version 5.1
 [CmdletBinding()]
 param(
+    [switch]$NoProgress,
     [bool]$Test = $true,
     [string]$Study = 'ppi',
     [ValidateSet('default','studySpecific')][string]$Scenario = 'default',

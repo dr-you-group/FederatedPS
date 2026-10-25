@@ -2,6 +2,7 @@
 [CmdletBinding()]
 param(
     [ValidateSet('Synthetic','SyntheticCDM','Database','Design')][string]$Mode = 'Synthetic',
+    [switch]$NoProgress,
     [bool]$Test = $false,
     [ValidateSet('YUHS','Example')][string]$Dataset = 'YUHS',
     [string[]]$Sites = @(),
@@ -19,6 +20,7 @@ param(
     [string]$RHome = 'C:\Program Files\R\R-4.6.1', [string]$JavaHome = ''
 )
 . (Join-Path $PSScriptRoot 'Common.ps1')
+. (Join-Path $PSScriptRoot 'Monitor.ps1')
 if ($Test) { $Mode = 'SyntheticCDM' }
 if ($Mode -eq 'SyntheticCDM' -and ($Dataset -ne 'YUHS' -or $Study -cne 'ppi' -or $Scenario -ne 'default')) {
     throw 'The synthetic YUHS CDM smoke test requires Dataset=YUHS, Study=ppi, Scenario=default.'
@@ -94,6 +96,8 @@ $configFile = Join-Path $output 'run.json'
 [IO.File]::WriteAllText($configFile, ($config | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false)))
 Invoke-FederatedR $runtime.Rscript @((Join-Path $PSScriptRoot 'preflight.R'), $configFile)
 $workers = @()
+$monitor = New-FederatedMonitor -RunDirectory $output -Roles (@('aggregator') + $Sites + @('verification')) -NoProgress:$NoProgress
+$runStarted = [DateTime]::UtcNow
 try {
     # Site workers load connection settings themselves. The aggregator must not
     # inherit database credentials from the invoking PowerShell session.
@@ -114,10 +118,25 @@ try {
     } finally {
         foreach ($key in $connectionKeys) { [Environment]::SetEnvironmentVariable($key, $savedConnection[$key], 'Process') }
     }
-    Write-Host "Run $RunId started. Logs: $output"
-    Wait-FederatedWorkers $workers $RunTimeoutSeconds
+    Write-FederatedProcessMetadata $output $workers
+    Write-Host "Run $RunId started. Live logs and status below. Files: $output"
+    Wait-FederatedWorkers $workers $RunTimeoutSeconds $monitor
+    Write-FederatedMonitorLine $monitor 'All model roles exited successfully. Starting final result verification.'
+    $verification = Join-Path $output 'verification'
+    New-Item -ItemType Directory -Path $verification | Out-Null
+    $workers += Start-FederatedWorker -Executable $runtime.Rscript -Arguments @('--vanilla', (Join-Path $PSScriptRoot 'verify-results.R'), $configFile) `
+        -WorkingDirectory $project -LogPrefix (Join-Path $verification 'run') -Role 'verification'
+    Write-FederatedProcessMetadata $output $workers
+    $remaining = [Math]::Max(1, $RunTimeoutSeconds - [int]([DateTime]::UtcNow-$runStarted).TotalSeconds)
+    Wait-FederatedWorkers $workers $remaining $monitor
+    if (-not (Test-Path -LiteralPath (Join-Path $output 'SUCCESS.txt'))) { throw 'Verification exited without SUCCESS.txt.' }
+    Write-FederatedMonitorLine $monitor "PASS: all roles and final verification completed. Results: $output"
+    [IO.File]::WriteAllText((Join-Path $output 'run-status.json'), '{"state":"success"}')
+} catch {
+    [IO.File]::WriteAllText((Join-Path $output 'run-status.json'), '{"state":"failed"}')
+    throw
 } finally {
     Stop-FederatedWorkers $workers
+    Update-FederatedMonitor $monitor -Force -Final
+    Complete-FederatedMonitor $monitor
 }
-Invoke-FederatedR $runtime.Rscript @((Join-Path $PSScriptRoot 'verify-results.R'), $configFile)
-Write-Host "PASS: all roles completed. Results: $output" -ForegroundColor Green

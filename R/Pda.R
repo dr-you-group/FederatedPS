@@ -17,6 +17,8 @@ aggregatePs <- function(config, sites, runId, timeout = 300) {
     # Layout state learned from the coordinate -1 specification exchange.
     blockSize <- NA_integer_
     nCoefficients <- NA_integer_
+    .fpsProgress("waiting-sites", "Waiting for site extraction and feature negotiation")
+    sweepProgress <- NULL
     repeat {
         key <- paste0(runId, "_", round)
         roundConfig <- config
@@ -56,6 +58,8 @@ aggregatePs <- function(config, sites, runId, timeout = 300) {
             }
             blockSize <- .blockSizeOf(first$specification$control)
             nCoefficients <- length(coefficientNames)
+            sweepProgress <- .newPsSweepProgress(nCoefficients, blockSize)
+            .fpsProgress("fitting", paste("Agreed model with", nCoefficients, "coefficients"))
             result <- keep
         } else if (coordinate == -2L) {
             for (site in sites) if (!identical(values[[site]], first)) stop("Hospital final models differ")
@@ -86,6 +90,8 @@ aggregatePs <- function(config, sites, runId, timeout = 300) {
             }
         }
         .putPs(result, paste0(key, "_total"), roundConfig)
+        if (coordinate >= 0L && !is.null(sweepProgress)) sweepProgress(coordinate)
+        if (coordinate == -2L) .fpsProgress("model-complete", "All sites agreed on the final model")
         if (coordinate == -2L) return(invisible(stats::setNames(result, coefficientNames)))
         round <- round + 1L
     }
@@ -137,8 +143,13 @@ aggregatePs <- function(config, sites, runId, timeout = 300) {
 
 .getPs <- function(name, config, timeout) {
     deadline <- Sys.time() + timeout
+    nextReport <- Sys.time() + 5
     while (!paste0(name, "_ready") %in% pda::pdaList(config)) {
         if (Sys.time() >= deadline) stop("Timed out waiting for ", name)
+        if (Sys.time() >= nextReport) {
+            .fpsProgress("waiting-exchange", paste("Waiting for", name), kind = "wait")
+            nextReport <- Sys.time() + 10
+        }
         Sys.sleep(0.001)
     }
     pda::pdaGet(name, config)

@@ -137,3 +137,23 @@ RStudio startup / real YUHS entry-point follow-up (2026-10-25):
   repository/bundle roots. HIWARE login alone does not populate the JDBC
   settings. Actual YUHS connectivity, SQL execution and Windows acceptance
   remain to be verified on the target host. No package reinstall is required.
+
+Live progress update, FederatedPs 0.0.6 (2026-10-25):
+
+- Optional process-local R observers report connection/extraction/model stages;
+  observer errors disable telemetry without changing fit results. No model wire
+  payload, protocol, cohort SQL, convergence rule or input definition changed.
+- Base-R test-progress.R checks partial final coordinate blocks, sweep reset,
+  per-sweep ETA math, unknown SQL/convergence duration and observer isolation.
+- Test-Monitor.ps1 uses real child processes and live shared log files: short
+  lines are visible BEFORE exit, split UTF-8 and partial JSON survive incremental
+  reads, monitoring preserves exit 7, and the watcher leaves run files unchanged.
+  CPU/start time may be unavailable on the Linux harness and remain unknown.
+- The full launcher regression suite and updated routing fixtures run on Linux
+  PowerShell 7.4.6. PowerShell parse checks and R 4.3.3 parse/base tests are used.
+  The routing fixtures mock database execution; they do not demonstrate a YUHS
+  connection. Native Windows 5.1/RStudio, installed OHDSI numerical execution
+  and real YUHS SQL timing/ETA accuracy still require target-host acceptance.
+- Stage percentages are completed extraction milestones, not time-weighted SQL
+  progress. Coordinate ETA covers only the current sweep; overall ETA remains
+  unknown. A live PID or quiet log does not prove SQL is advancing or deadlocked.

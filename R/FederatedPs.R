@@ -44,6 +44,7 @@ fitPs <- function(cohortMethodData, population = NULL, covariateIds = NULL,
         stop("Use alphanumeric run and hospital identifiers; total is reserved")
     }
     if (paste0(runId, "_0_", config$site_id) %in% pda::pdaList(config)) stop("Use a new runId")
+    .fpsProgress("model-input", "Preparing local model inputs and negotiating features")
     round <- 0L
     exchange <- function(coordinate, statistics) {
         key <- paste0(runId, "_", round)
@@ -102,11 +103,13 @@ fitPs <- function(cohortMethodData, population = NULL, covariateIds = NULL,
     prior <- Cyclops::createPrior("laplace", variance = priorVariance,
                                   exclude = "(Intercept)", useCrossValidation = FALSE)
     control$aggregate <- exchange
+    .fpsProgress("fitting", "Cyclops fitting; see aggregator for current-sweep progress")
     fit <- Cyclops::fitCyclopsModel(cyclopsData, prior = prior, control = control,
                                     startingCoefficients = startingCoefficients[c(TRUE, keep)])
     if (fit$return_flag != "SUCCESS") stop("Cyclops did not converge: ", fit$return_flag)
     coefficients <- stats::coef(fit)
     exchange(-2L, list(coefficients = unname(coefficients), iterations = fit$iterations))
+    .fpsProgress("predicting", "Computing local propensity scores")
     ps <- stats::predict(fit)
     if (!setequal(names(ps), rows) || any(!is.finite(ps)) || any(ps <= 0 | ps >= 1)) stop("Invalid prediction rows or values")
     population$propensityScore <- unname(ps[match(rows, names(ps))])

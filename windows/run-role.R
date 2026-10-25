@@ -2,11 +2,15 @@ args <- commandArgs(trailingOnly = TRUE)
 stopifnot(length(args) == 2L)
 config <- jsonlite::fromJSON(args[1])
 role <- args[2]
+out <- file.path(config$output, role)
+source(file.path(config$project, "windows", "progress.R"))
+options(FederatedPs.progress = fp_start_progress(out, role))
+progress <- function(stage, detail = "") utils::getFromNamespace(".fpsProgress", "FederatedPs")(stage, detail)
 source(file.path(config$project, "windows", "common.R"))
+progress("startup", "Checking offline runtime")
 fp_verify_runtime(config$project)
 fp_check_names(config$runId, config$sites)
 stopifnot(role %in% c("aggregator", config$sites))
-out <- file.path(config$output, role)
 Sys.setenv(PDA_DIR = config$exchange, FEDERATEDPS_SITE = role,
            FEDERATEDPS_RUN = config$runId, FEDERATEDPS_STUDY = config$study,
            FEDERATEDPS_SCENARIO = config$scenario,
@@ -26,6 +30,7 @@ if (role == "aggregator") {
         if (yuhs) fp_check_yuhs_sites(config)
         synthetic <- config$mode == "SyntheticCDM"
         data <- if (synthetic) {
+            progress("sample", "Loading local synthetic CDM")
             fp_check_synthetic_yuhs(config)
             Sys.unsetenv(fp_connection_keys())
             cat("TEST=true: loading invented local CDM tables; DB access is disabled in this path.\n")
@@ -45,6 +50,7 @@ if (role == "aggregator") {
             for (name in c("careSite", "sitePartition", "recordLinkage", "attrition"))
                 write.csv(metadata[[name]], file.path(out, paste0(name, ".csv")), row.names = FALSE, fileEncoding = "UTF-8")
         }
+        progress("population", "Creating study population")
         population <- CohortMethod::createStudyPopulation(data,
             createStudyPopulationArgs = CohortMethod::createCreateStudyPopulationArgs(
                 removeSubjectsWithPriorOutcome = FALSE, minDaysAtRisk = 0))
@@ -79,5 +85,7 @@ if (role == "aggregator") {
         config = pda_config, runId = config$runId, priorVariance = 1,
         control = fp_control(config), timeout = config$exchangeTimeout)
 }
+progress("saving", "Writing role-local result.rds")
 saveRDS(result, file.path(out, "result.rds"))
+progress("role-complete", "Role result saved; final cross-site verification is still required")
 cat("PASS:", role, "completed\n")

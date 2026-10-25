@@ -88,10 +88,12 @@ function Start-FederatedWorker {
     $process.StartInfo = $info
     $stdout = $null; $stderr = $null; $started = $false
     try {
-        $stdout = [IO.File]::Open("$LogPrefix.stdout.log", [IO.FileMode]::Create,
-            [IO.FileAccess]::Write, [IO.FileShare]::Read)
-        $stderr = [IO.File]::Open("$LogPrefix.stderr.log", [IO.FileMode]::Create,
-            [IO.FileAccess]::Write, [IO.FileShare]::Read)
+        # Buffer size 1 disables the FileStream write buffer so short log lines
+        # become visible to the live reader before the worker exits.
+        $stdout = New-Object IO.FileStream("$LogPrefix.stdout.log", [IO.FileMode]::Create,
+            [IO.FileAccess]::Write, [IO.FileShare]::Read, 1)
+        $stderr = New-Object IO.FileStream("$LogPrefix.stderr.log", [IO.FileMode]::Create,
+            [IO.FileAccess]::Write, [IO.FileShare]::Read, 1)
         $started = $process.Start()
         if (-not $started) { throw "Could not start role $Role." }
         # Drain both pipes concurrently using .NET tasks; no PowerShell event
@@ -112,9 +114,10 @@ function Start-FederatedWorker {
     }
 }
 
-function Wait-FederatedWorkers([object[]]$Workers, [int]$TimeoutSeconds) {
+function Wait-FederatedWorkers([object[]]$Workers, [int]$TimeoutSeconds, $Monitor = $null) {
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     while ($true) {
+        if ($null -ne $Monitor) { Update-FederatedMonitor $Monitor $Workers }
         $active = 0
         foreach ($worker in $Workers) {
             if ($worker.Completed) { continue }

@@ -39,7 +39,9 @@ getDbStudyData <- function(connectionDetails, cdmDatabaseSchema, study = "opioid
                            scenario = c("default", "studySpecific"), careSiteId = NULL) {
     settings <- getStudySettings(study, scenario)
     .validateCdmSchema(cdmDatabaseSchema)
+    .fpsProgress("connecting", "Opening database connection")
     connection <- DatabaseConnector::connect(connectionDetails)
+    .fpsProgress("connected", "Database connection established")
     on.exit(DatabaseConnector::disconnect(connection), add = TRUE)
     dbms <- DatabaseConnector::dbms(connection)
     if (identical(dbms, "sql server")) {

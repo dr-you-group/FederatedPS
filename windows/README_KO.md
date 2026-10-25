@@ -338,3 +338,48 @@ R/Rtools/Java/Cyclops/FederatedPs를 다시 설치하거나 DB 설정을 바꿀 
 `noisy.stdout.log ... being used by another process`는 첫 실행기 수정의 로그 닫기
 순서에서 발생한 문제입니다. 후속 수정은 로그 복사가 완료된 후 파일 쓰기 핸들을
 즉시 닫고 검사하도록 변경했습니다. 해당 패치 후 04번을 다시 실행하십시오.
+
+## 실시간 로그와 진행 상황 (0.0.6)
+
+`Run-YUHS.ps1`은 기본적으로 집계기/기관별 stdout·stderr를 실시간으로 표시합니다.
+약 1초 간격으로 진행 막대를 갱신하고 15초마다 텍스트 상태를 남깁니다.
+프로세스 PID/경과 시간, CPU 사용량(코어 하나=100%), 마지막 로그·진행 이벤트 이후
+시간을 표시합니다. CPU 정보를 OS에서 제공하지 못하면 `?`입니다.
+프로세스가 살아 있거나 CPU가 낮다는 사실만으로 SQL 실행이 정상/정지했다고 판단하지 않습니다.
+
+- DB 연결 시작과 성공을 구분합니다. 이후 기관 분리, 연결 검사, 컨셉 정의,
+  코호트, 공변량 추출·전송을 표시합니다.
+- DB 추출 막대의 %는 **10개 작업 단계 중 완료한 단계 수**입니다. 단계별 작업량은
+  다르므로 데이터 행 처리율이나 남은 시간 비율이 아닙니다. SQL 단일 쿼리의 ETA는
+  `unknown`으로 표시합니다. 추가 DB 모니터링 권한이나 중복 COUNT 쿼리는 요구하지 않습니다.
+- 집계기의 CCD 막대는 **현재 sweep에서 완료한 좌표/전체 좌표**입니다. ETA는 해당
+  sweep의 관측 처리 속도로 추정하며, 전체 학습 종료 시간이 아닙니다. 다음 sweep에서
+  %가 다시 시작됩니다. 수렴 검사/기관 대기 중에는 ETA가 unknown으로 돌아갑니다.
+  10초 넘게 갱신되지 않은 ETA도 표시하지 않습니다. maxIterations를 완료율의 분모로 쓰지 않습니다.
+- 전체 역할 완료 후 최종 결과 검증도 별도 프로세스/로그로 감시합니다. 종료 코드가
+  0이어도 `SUCCESS.txt`가 없으면 성공으로 처리하지 않습니다.
+
+결과 폴더의 `monitor.log`는 합쳐진 텍스트 출력, 각 역할의 `progress.jsonl`은
+단계 이벤트입니다. 기존 `run.stdout.log`/`run.stderr.log`도 그대로 저장합니다.
+진행 이벤트에는 접속 정보, SQL 본문, 환자별 데이터 또는 PS 값을 넣지 않습니다.
+표시만 숨기려면 `-NoProgress`를 사용합니다. 이때도 실시간 로그와 15초 상태는 남습니다.
+
+기존 0.0.5 설치에서 업그레이드할 때는 진행 중인 분석이 끝난 뒤 R/RStudio를 닫고:
+
+```powershell
+.\windows\Update-FederatedPs.ps1
+```
+
+FederatedPs 0.0.6만 설치하고 기존 Cyclops/JDBC/의존성은 재사용합니다. 전체 C++ 재빌드인
+`Install-Offline.ps1`을 반복할 필요는 없습니다. DB 설정과 `windows/common.R`의 로컬
+SSL 변경은 진행 표시용 패치에서 보존됩니다. 새 전체 번들의 기본 TLS 설정은 기존과 같습니다.
+
+이미 실행 중인 작업은 별도 PowerShell 창에서 읽기 전용 모니터로 볼 수 있습니다:
+
+```powershell
+.\windows\Watch-FederatedRun.ps1 -RunDirectory 'C:\FederatedPS_YUHS_Offline\FederatedPS\work\windows\<RunId>'
+```
+
+이 모니터에서 Ctrl+C는 모니터만 끝내며 분석 프로세스를 종료하지 않습니다.
+업데이트 전 시작한 작업에는 단계 이벤트가 없으므로 기존 로그를 표시하고
+%/ETA는 unknown입니다. 새 단계/진행률 표시는 업데이트 후 새 실행부터 적용됩니다.

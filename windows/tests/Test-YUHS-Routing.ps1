@@ -4,7 +4,7 @@ $project = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('fps yuhs routing ' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path (Join-Path $temp 'config') -Force | Out-Null
 try {
-    foreach ($file in @('Run-FederatedPS.ps1','Run-YUHS.ps1')) {
+    foreach ($file in @('Run-FederatedPS.ps1','Run-YUHS.ps1','Monitor.ps1')) {
         Copy-Item (Join-Path $project "windows\$file") (Join-Path $temp $file)
     }
     Copy-Item (Join-Path $project 'windows\config\yuhs-sites.json') (Join-Path $temp 'config\yuhs-sites.json')
@@ -16,10 +16,11 @@ function Assert-FederatedNames { param($RunId,$Sites) }
 function Set-FederatedEnvironment { param($InstallRoot,$RHome,$JavaHome); @{Rscript='unused'} }
 function Invoke-FederatedR { param($Rscript,$Arguments) }
 function Start-FederatedWorker { param($Executable,$Arguments,$WorkingDirectory,$LogPrefix,$Role)
+    if ($Role -eq 'verification') { [IO.File]::WriteAllText((Join-Path (Split-Path (Split-Path $LogPrefix -Parent) -Parent) 'SUCCESS.txt'),'fixture') }
     [pscustomobject]@{ Role=$Role }
 }
 function Wait-FederatedWorkers { param($Workers,$TimeoutSeconds)
-    if ($Workers.Count -ne 4) { throw 'Expected four workers.' }
+    if ($Workers.Count -notin @(4,5)) { throw 'Expected four model workers, then verification.' }
 }
 function Stop-FederatedWorkers { param($Workers) }
 '@ | Set-Content -LiteralPath (Join-Path $temp 'Common.ps1') -Encoding UTF8

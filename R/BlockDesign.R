@@ -36,6 +36,7 @@ fitPsDesign <- function(x, treatment, rowIds, covariateIds = NULL, config, runId
     if (!all(grepl("^[A-Za-z0-9]+$", c(runId, config$site_id))) || config$site_id == "total") {
         stop("Use alphanumeric run and hospital identifiers; total is reserved")
     }
+    .fpsProgress("model-input", "Preparing local model inputs and negotiating features")
     round <- 0L
     counts <- new.env(); counts$overhead <- 0L; counts$loop <- 0L; counts$conv <- 0L
     counts$bytes <- 0
@@ -99,6 +100,7 @@ fitPsDesign <- function(x, treatment, rowIds, covariateIds = NULL, config, runId
     prior <- Cyclops::createPrior("laplace", variance = priorVariance,
                                   exclude = "(Intercept)", useCrossValidation = FALSE)
     control$aggregate <- exchange
+    .fpsProgress("fitting", "Cyclops fitting; see aggregator for current-sweep progress")
     tFit <- Sys.time()
     fit <- Cyclops::fitCyclopsModel(cyclopsData, prior = prior, control = control,
                                     startingCoefficients = startingCoefficients[c(TRUE, keep)])
@@ -106,6 +108,7 @@ fitPsDesign <- function(x, treatment, rowIds, covariateIds = NULL, config, runId
     if (fit$return_flag != "SUCCESS") stop("Cyclops did not converge: ", fit$return_flag)
     coefficients <- stats::coef(fit)
     exchange(-2L, list(coefficients = unname(coefficients), iterations = fit$iterations))
+    .fpsProgress("predicting", "Computing local propensity scores")
     ps <- stats::predict(fit)
     list(coefficients = coefficients, propensityScore = unname(ps[match(rows, names(ps))]),
          rowIds = rowIds, iterations = fit$iterations, keep = keep,

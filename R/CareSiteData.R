@@ -66,9 +66,13 @@
         sql <- paste(readLines(path, warn = FALSE), collapse = "\n")
         run(SqlRender::render(sql, cdm_database_schema = schema, care_site_id = careSiteId, ...))
     }
+    step <- function(done, detail) .fpsProgress("extract", detail, done, 10, "extraction steps (not time)")
+    step(0, "CARE_SITE lookup")
     institution <- query(sprintf("SELECT care_site_id, care_site_name, care_site_source_value FROM %s.CARE_SITE WHERE care_site_id = %d", schema, careSiteId))
     if (nrow(institution) != 1L) stop("Expected one CARE_SITE row for careSiteId ", careSiteId)
+    step(1, "SitePartition.sql: assigning exclusive patients and visits")
     execute("SitePartition.sql")
+    step(2, "Counting site partition results")
     partition <- query(sprintf("SELECT
         (SELECT COUNT_BIG(*) FROM #fps_person) AS exclusive_persons,
         (SELECT COUNT_BIG(*) FROM #fps_visit) AS linked_visits,
@@ -77,6 +81,7 @@
     if (partition$exclusivePersons == 0) stop("No patients with visits exclusive to careSiteId ", careSiteId)
     domains <- c("DRUG_EXPOSURE", "CONDITION_OCCURRENCE", "PROCEDURE_OCCURRENCE", "MEASUREMENT")
     linkage <- do.call(rbind, lapply(domains, function(table) {
+        step(3, paste("Auditing visit linkage:", table))
         counts <- query(sprintf("SELECT COUNT_BIG(*) AS candidate_records,
             COALESCE(SUM(CAST(CASE WHEN v.visit_occurrence_id IS NULL THEN 1 ELSE 0 END AS BIGINT)), 0) AS excluded_records
             FROM %s.%s d JOIN #fps_person p ON p.person_id = d.person_id
@@ -105,6 +110,7 @@
         if (!length(rows)) return(if (quote) "(1, '')" else "(1, 0)")
         paste(rows, collapse = ", ")
     }
+    step(4, "Resolving study concept definitions")
     execute("StudyConcepts.sql", ingredient_rows = values(ingredients), atc_rows = values(atc, TRUE))
     missing <- query(sprintf("SELECT r.ingredient_id FROM #fps_requested_ingredients r WHERE NOT EXISTS (
         SELECT 1 FROM %s.CONCEPT c WHERE c.concept_id = r.ingredient_id
@@ -117,6 +123,7 @@
     comparator <- resolved$ingredientId[resolved$arm == 0]
     if (!length(target) || !length(comparator) || length(intersect(target, comparator)))
         stop("Target and comparator must resolve to nonempty, disjoint ingredient sets")
+    step(5, "Building study exposures")
     if (specific) {
         roots <- query(sprintf("SELECT concept_id FROM %s.CONCEPT WHERE domain_id = 'Condition'
             AND standard_concept = 'S' AND concept_id IN (%s)", schema, paste(settings$indicationConceptIds, collapse = ",")))
@@ -127,6 +134,7 @@
             prior_days = settings$priorObservationDays, indication_days = settings$indicationDays,
             washout_days = settings$washoutDays)
     } else execute("DefaultStudy.sql")
+    step(6, "Building and fetching CohortMethod cohorts")
     sql <- SqlRender::loadRenderTranslateSql("CreateOrCountCohorts.sql", packageName = "CohortMethod",
         dbms = "sql server", cdm_database_schema = schema,
         exposure_database_schema = "tempdb.dbo", exposure_table = "#fps_exposure",
@@ -146,12 +154,15 @@
     counts <- c(target = sum(cohorts$treatment == 1), comparator = sum(cohorts$treatment == 0))
     message("care_site_id ", careSiteId, ": target = ", counts[1], ", comparator = ", counts[2])
     if (any(counts == 0)) stop("Both treatment groups are required; study criteria were not relaxed")
+    step(7, "Covariates.sql: extracting site-linked clinical features")
     execute("Covariates.sql", clinical_sql = .careSiteClinicalSql(schema, settings))
     data <- Andromeda::andromeda()
     complete <- FALSE
     on.exit(if (!complete) Andromeda::close(data), add = TRUE)
+    step(8, "Transferring covariates to local Andromeda")
     DatabaseConnector::querySqlToAndromeda(connection, "SELECT row_id, covariate_id, covariate_value FROM #fps_covariates",
         andromeda = data, andromedaTableName = "covariates", snakeCaseToCamelCase = TRUE)
+    step(9, "Transferring feature metadata")
     DatabaseConnector::querySqlToAndromeda(connection, sprintf("SELECT DISTINCT f.covariate_id,
         f.covariate_id %% 1000 AS analysis_id,
         CASE WHEN f.covariate_id %% 1000 = 2 THEN 0 ELSE f.covariate_id / 1000 END AS concept_id,
@@ -175,5 +186,6 @@
     class(data) <- "CohortMethodData"
     attr(class(data), "package") <- "CohortMethod"
     complete <- TRUE
+    step(10, "Extraction complete")
     data
 }
