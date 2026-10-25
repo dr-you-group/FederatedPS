@@ -41,7 +41,7 @@ function Test-FreshManifest([string]$Root) {
         $seen[[string]$entry.path] = $true
         $path = Get-FreshPayloadPath $Root $entry.path
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing bundled file: $($entry.path)" }
-        if ((Get-Item -LiteralPath $path).Length -ne [long]$entry.bytes -or
+        if ((Get-Item -LiteralPath $path -Force).Length -ne [long]$entry.bytes -or
             (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $entry.sha256) { throw "Integrity failure: $($entry.path)" }
     }
     foreach ($relative in @('installers/R-4.6.1-win.exe','installers/rtools45-6768-6492.exe',
