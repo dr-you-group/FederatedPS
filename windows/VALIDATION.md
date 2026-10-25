@@ -1,3 +1,27 @@
+## 0.0.9 SQL progress, per-site status and sequential extraction
+
+Validated on 2026-10-26 with Linux R 4.3.3 and PowerShell 7.4.6:
+
+- `test-sql-progress.R`: before-send SQL files/events, statement order and counters,
+  row-count bounds, one final commit callback, failed statement/commit propagation,
+  matched historical timing estimates and independent site snapshots.
+- `Test-SqlSiteMonitor.ps1`: numeric site IDs, queued/data-ready/fitting state,
+  live operation elapsed time, no fabricated cold-start/overdue ETA, partial writes,
+  and read-only attachment to selected-method runs.
+- `test-site-partition.py`: old COUNT DISTINCT vs new MIN/MAX semantics on adversarial
+  and randomized visits including null/nonpositive/unconfigured site IDs. Compare exact
+  exclusive persons, required visit columns and whole-CDM multisite count using SQLite
+  adaptations of the template. This is not a SQL Server performance benchmark.
+- Existing patient-limit, cache, baseline, progress, DB diagnostics and launcher tests.
+
+The SQL helper follows the SQL Server non-batched DatabaseConnector execution path:
+SqlRender splitting, DBI execution in the original order, and a single final JDBC
+commit when auto-commit is disabled. No per-statement executeSql commits or SQL retries.
+Actual JDBC transaction behavior, SQL Server execution plans, Windows Server R 4.6.1,
+HIWARE, Andromeda and native Cyclops end-to-end still require target-host validation.
+No real YUHS speedup factor has been measured. Site extraction is sequential, with
+numeric site IDs sorted by default and an explicit -Sites order respected.
+
 ## 0.0.8 method selection and extraction checkpoints
 
 New base-R checks: `windows/tests/test-baseline-models.R`, `test-data-cache.R`.

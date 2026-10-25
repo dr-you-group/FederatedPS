@@ -18,19 +18,28 @@
 }
 
 .fpsDbOperation <- function(label, expr, sql = NULL, completed = NA_real_,
-                            stage = "extract", total = 10) {
+                            stage = "extract", total = 10, statement = NULL) {
     index <- getOption("FederatedPs.dbOperationIndex", 0L) + 1L
     options(FederatedPs.dbOperationIndex = index)
     operation <- sprintf("%04d-%s", index, gsub("[^A-Za-z0-9_-]+", "-", label))
-    if (!is.null(sql)) .fpsDiagnosticWrite(paste0(operation, ".sql"), sql)
+    sqlFile <- NULL
+    if (!is.null(sql) && .fpsDiagnosticWrite(paste0(operation, ".sql"), sql))
+        sqlFile <- file.path(getOption("FederatedPs.sqlDiagnosticsDirectory"), paste0(operation, ".sql"))
     started <- proc.time()[["elapsed"]]
+    startedUtc <- format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")
     unit <- if (stage == "extract") "extraction steps (not time)" else ""
     if (stage != "extract") total <- NA_real_
-    emit <- function(status) {
+    emit <- function(status, result = NULL) {
         elapsed <- max(0, proc.time()[["elapsed"]] - started)
         detail <- if (status == "started") paste0(label, " [started]") else
             sprintf("%s [%s; %.3f s]", label, status, elapsed)
-        .fpsProgress(stage, detail, completed, total, unit)
+        rows <- if (is.data.frame(result)) nrow(result) else NA_real_
+        affected <- if (!is.null(statement) && is.numeric(result) && length(result) == 1L &&
+            is.finite(result) && result >= 0) as.numeric(result) else NA_real_
+        info <- c(list(id = operation, status = status, startedUtc = startedUtc,
+            elapsedSeconds = elapsed, sqlFile = sqlFile, rowsFetched = rows, rowsAffected = affected), statement)
+        if (!is.null(statement)) info$statementsCompleted <- statement$statementIndex - as.integer(status != "completed")
+        .fpsProgress(stage, detail, completed, total, unit, operation = info)
         .fpsDiagnosticWrite("operations.tsv", paste(
             format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"), Sys.getpid(),
             operation, status, sprintf("%.3f", elapsed), sep = "\t"), append = TRUE)
@@ -42,7 +51,7 @@
         emit("failed")
         stop(e)
     })
-    emit("completed")
+    emit("completed", result)
     result
 }
 

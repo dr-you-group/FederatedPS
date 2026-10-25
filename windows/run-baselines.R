@@ -7,9 +7,13 @@ source(file.path(config$project, "windows", "db-runtime.R"))
 source(file.path(config$project, "windows", "baseline-models.R"))
 source(file.path(config$project, "windows", "data-cache.R"))
 context <- new.env(); context$label <- "baseline startup"
-observer <- fp_start_progress(file.path(config$output, "baselines"), "baselines")
+context$site <- ""; context$state <- "startup"
+observer <- fp_start_progress(file.path(config$output, "baselines"), "baselines",
+    historyDirectory = file.path(config$project, "work", "progress-history"))
 options(FederatedPs.progress = function(event) {
     event$detail <- paste0(context$label, ": ", event$detail)
+    event$siteId <- context$site
+    event$siteState <- context$state
     observer(event)
 })
 progress <- utils::getFromNamespace(".fpsProgress", "FederatedPs")
@@ -17,6 +21,7 @@ progress <- utils::getFromNamespace(".fpsProgress", "FederatedPs")
 extract_site <- function(site) {
     patientLimit <- config$patientLimits[[site]]
     context$label <- paste("extract", site)
+    context$site <- site; context$state <- "extracting"
     out <- file.path(config$output, "extraction", site)
     dir.create(out, recursive = TRUE, showWarnings = FALSE)
     options(andromedaTempFolder = file.path(out, "andromeda"))
@@ -81,6 +86,7 @@ main <- function() {
         cached <- if (isTRUE(config$rebuildData)) NULL else fp_cache_read(config$cacheDirectory,contract,site)
         if (!is.null(cached)) {
             context$label <- paste("reuse",site)
+            context$site <- site; context$state <- "data-ready (cache)"
             progress("cache-hit", "Verified completed extraction; skipping DB, CohortMethod and covariate extraction")
             designs[[site]] <- cached$design
             path <- cached$path
@@ -88,6 +94,7 @@ main <- function() {
         } else {
             designs[[site]] <- extract_site(site)
             path <- fp_cache_write(config$cacheDirectory,contract,site,designs[[site]])
+            context$state <- "data-ready"
             progress("checkpoint",paste(site,"complete: population and covariates saved for reuse"))
             cat("CACHE SAVED:",site,";",path,"\n")
         }
@@ -109,16 +116,20 @@ main <- function() {
     summaries <- list()
     if ("local-only" %in% config$methods) for (site in config$sites) {
         context$label <- paste("local-only", site)
+        context$site <- site; context$state <- "local-fitting"
         progress("fitting", "Starting site-only Cyclops model")
         result <- fp_baseline_fit(designs[[site]], config)
         destination <- file.path(config$output, "local", site)
         summaries[[site]] <- fp_baseline_save(result, destination, "local-only", site)
         fp_baseline_verify(designs[[site]], destination)
+        context$state <- "local-complete"
+        progress("local-complete", "Site-only model saved and verified")
         cat("MODEL VERIFIED: local-only", site, "\n"); flush(stdout())
         rm(result); invisible(gc())
     }
     if ("pooled" %in% config$methods) {
         context$label <- "pooled"
+        context$site <- ""; context$state <- "pooled-fitting"
         progress("model-input", "Aligning feature IDs and combining all three site designs on this server")
         pooled <- fp_baseline_pool(designs)
         progress("fitting", "Starting one centralized pooled Cyclops model")
@@ -128,6 +139,7 @@ main <- function() {
         fp_baseline_verify(pooled, destination)
     }
     summary <- if (length(summaries)) do.call(rbind, summaries) else data.frame()
+    context$site <- ""; context$state <- "finalizing"
     utils::write.csv(summary, file.path(config$output, "summary.csv"), row.names = FALSE)
     jsonlite::write_json(list(runId = config$runId, state = "results-validated",
         methods = config$methods, sites = config$sites, models = length(summaries)),

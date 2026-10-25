@@ -102,9 +102,12 @@ function Write-FederatedProcessMetadata {param($Directory,$Workers)}
         if(-not $caught -or (Test-Path (Join-Path $work "$id/SUCCESS.txt"))){throw "Failed completion accepted: $id"}
     }
     # IDs are read from configuration, never from hard-coded institution names.
-    '{"alphaLabel":17,"betaLabel":42,"gammaLabel":99}' | Set-Content (Join-Path $temp 'config/yuhs-sites.json')
+    '{"gammaLabel":99,"alphaLabel":17,"betaLabel":42}' | Set-Content (Join-Path $temp 'config/yuhs-sites.json')
     & $run -Test $false -RunId customids -WorkDirectory $work -PatientLimits @{17=12;42=24;99=36}
     $c=Get-Content (Join-Path $work 'customids/run.json') -Raw | ConvertFrom-Json
     if(($c.sites -join ',') -ne '17,42,99' -or $c.patientLimits.'42' -ne 24 -or $c.careSites.'99' -ne 99){throw 'Hard-coded site names or limits'}
+    & $run -Test $false -RunId customorder -WorkDirectory $work -Sites @('99','17','42')
+    $c=Get-Content (Join-Path $work 'customorder/run.json') -Raw | ConvertFrom-Json
+    if(($c.sites -join ',') -ne '99,17,42'){throw 'Explicit site order was not respected'}
     Write-Host 'PASS: seven method combinations; one extraction worker; prepared federation; settings; native failures and missing/stale completion rejected.'
 } finally {Remove-Item -LiteralPath $temp -Recurse -Force}

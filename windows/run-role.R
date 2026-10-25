@@ -4,7 +4,8 @@ config <- jsonlite::fromJSON(args[1])
 role <- args[2]
 out <- file.path(config$output, role)
 source(file.path(config$project, "windows", "progress.R"))
-options(FederatedPs.progress = fp_start_progress(out, role))
+options(FederatedPs.progress = fp_start_progress(out, role,
+    historyDirectory = file.path(config$project, "work", "progress-history")))
 progress <- function(stage, detail = "") utils::getFromNamespace(".fpsProgress", "FederatedPs")(stage, detail)
 source(file.path(config$project, "windows", "common.R"))
 source(file.path(config$project, "windows", "db-runtime.R"))

@@ -6,13 +6,16 @@ $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'Monitor.ps1')
 $RunDirectory=(Resolve-Path -LiteralPath $RunDirectory).Path
 $config=Get-Content -LiteralPath (Join-Path $RunDirectory 'run.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-$roles=@('aggregator')+@($config.sites)+@('verification')
+$selected=$config.PSObject.Properties['mode'] -and $config.mode -eq 'SelectedMethods'
+$roles=if($selected){@('baselines','verification')}else{@('aggregator')+@($config.sites)+@('verification')}
 foreach($role in $roles) { if($role -notmatch '^[A-Za-z0-9]+$'){throw 'Invalid role in run configuration.'} }
-$monitor=New-FederatedMonitor -RunDirectory $RunDirectory -Roles $roles -ReadOnly -NoProgress:$NoProgress -StatusSeconds $StatusSeconds
+$siteOptions=@{}
+if($selected){$siteOptions['Sites']=@($config.sites);$siteOptions['SiteLabels']=$config.siteLabels}
+$monitor=New-FederatedMonitor -RunDirectory $RunDirectory -Roles $roles -ReadOnly -NoProgress:$NoProgress -StatusSeconds $StatusSeconds @siteOptions
 $monitor.Started=(Get-Item -LiteralPath (Join-Path $RunDirectory 'run.json')).LastWriteTimeUtc
 Write-Host 'Read-only monitor. Ctrl+C stops this viewer only. Legacy runs have logs but no stage/ETA events.'
 
-function Get-FederatedWatchedProcess($Entry) {
+function Get-FederatedWatchedProcess($Entry, [string]$Directory=$RunDirectory) {
     $parent=$null
     try {
         $candidate=Get-Process -Id $Entry.pid -ErrorAction SilentlyContinue
@@ -24,7 +27,7 @@ function Get-FederatedWatchedProcess($Entry) {
         # Older launches retained an architecture-wrapper PID. The first R
         # event identifies the interpreter, but a saved PID alone is unsafe:
         # require the original creation window and this run's exact arguments.
-        $eventPath=Join-Path (Join-Path $RunDirectory $Entry.role) 'progress.jsonl'
+        $eventPath=Join-Path (Join-Path $Directory $Entry.role) 'progress.jsonl'
         if (-not (Test-Path -LiteralPath $eventPath)) { return $parent }
         $first=Get-Content -LiteralPath $eventPath -TotalCount 1 -Encoding UTF8 | ConvertFrom-Json
         if (-not $first.PSObject.Properties['pid'] -or $first.role -ne $Entry.role -or
@@ -37,7 +40,7 @@ function Get-FederatedWatchedProcess($Entry) {
         $created=ConvertTo-FederatedUtc $identity.CreationDate
         $wrapperStarted=ConvertTo-FederatedUtc $Entry.startUtc
         $eventStarted=ConvertTo-FederatedUtc $first.timestamp
-        $configPath=Join-Path $RunDirectory 'run.json'
+        $configPath=Join-Path $Directory 'run.json'
         if ($created -lt $wrapperStarted.AddSeconds(-1) -or $created -gt $eventStarted.AddSeconds(1) -or
             $identity.CommandLine -notmatch [regex]::Escape($configPath) -or
             $identity.CommandLine -notmatch '(?i)(?:\\|/)run-role[.]R' -or
@@ -55,6 +58,7 @@ function Get-FederatedWatchedProcess($Entry) {
     $parent
 }
 
+$nestedMonitor=$null
 try {
     do {
         $workers=@()
@@ -72,6 +76,25 @@ try {
         }
         try { Update-FederatedMonitor $monitor $workers -Force:$Once }
         finally { foreach($worker in $workers){$worker.Process.Dispose()} }
+        if($selected -and $config.PSObject.Properties['federatedOutput'] -and
+            (Test-Path -LiteralPath (Join-Path $config.federatedOutput 'run.json'))) {
+            if($null -eq $nestedMonitor) {
+                $nestedRoles=@('aggregator')+@($config.sites)+@('verification')
+                $nestedMonitor=New-FederatedMonitor -RunDirectory $config.federatedOutput -Roles $nestedRoles -ReadOnly -NoProgress -StatusSeconds $StatusSeconds
+            }
+            $nestedWorkers=@()
+            try {
+                $pfile=Join-Path $config.federatedOutput 'processes.json'
+                if(Test-Path -LiteralPath $pfile){
+                    foreach($entry in @(Get-Content -LiteralPath $pfile -Raw | ConvertFrom-Json)) {
+                        if($entry.role -notin $nestedRoles){continue}
+                        $p=Get-FederatedWatchedProcess $entry $config.federatedOutput
+                        if($p){$nestedWorkers += [pscustomobject]@{Role=$entry.role;Process=$p}}
+                    }
+                }
+                Update-FederatedMonitor $nestedMonitor $nestedWorkers -Force:$Once
+            } finally {foreach($worker in $nestedWorkers){$worker.Process.Dispose()}}
+        }
         if (Test-Path -LiteralPath (Join-Path $RunDirectory 'SUCCESS.txt')) { Write-Host 'SUCCESS.txt exists: final verification passed.'; break }
         $statusPath=Join-Path $RunDirectory 'run-status.json'
         if (Test-Path -LiteralPath $statusPath) {

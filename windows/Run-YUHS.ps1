@@ -6,6 +6,7 @@ param(
     [hashtable]$PatientLimits=@{},
     [string]$CacheDirectory='', [switch]$RebuildData,
     [switch]$NoProgress,
+    [ValidateRange(1,3600)][int]$StatusSeconds = 15,
     [bool]$Test = $true,
     [string]$Study = 'ppi',
     [ValidateSet('default','studySpecific')][string]$Scenario = 'default',

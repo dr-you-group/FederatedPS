@@ -18,6 +18,7 @@ param(
     [ValidateRange(1,2147483647)][int]$RunTimeoutSeconds=86400,
     [ValidateRange(1,3600)][int]$ShutdownTimeoutSeconds=60,
     [string]$RunId=([guid]::NewGuid().ToString('N')), [switch]$NoProgress,
+    [ValidateRange(1,3600)][int]$StatusSeconds=15,
     [string]$ConfigDirectory='', [string]$WorkDirectory='', [string]$ExchangeDirectory='',
     [string]$InstallRoot='C:\FederatedPS',
     [string]$RHome='C:\Program Files\R\R-4.6.1', [string]$JavaHome=''
@@ -41,7 +42,7 @@ foreach($property in $mapping.PSObject.Properties){
     if($careSites.Contains($key)){throw 'Duplicate CARE_SITE_ID in yuhs-sites.json.'}
     $careSites[$key]=[int]$id;$siteLabels[$key]=$property.Name
 }
-$known=@($careSites.Keys)
+$known=@($careSites.Keys | Sort-Object { [long]$_ })
 if(-not $Sites.Count){$Sites=@($known)}
 Assert-FederatedNames $RunId $Sites
 if($Sites.Count -ne $known.Count -or @($Sites | Where-Object {$_ -cnotin $known}).Count){throw 'Sites must be all configured CARE_SITE_IDs, not institution names.'}
@@ -86,19 +87,21 @@ $config=[ordered]@{project=$project; runId=$RunId; mode='SelectedMethods'; metho
     federatedOutput=(Join-Path (Join-Path $out 'federated-runtime') $RunId)}
 $configFile=Join-Path $out 'run.json'
 [IO.File]::WriteAllText($configFile,($config | ConvertTo-Json -Depth 5),(New-Object Text.UTF8Encoding($false)))
-$workers=@();$monitor=New-FederatedMonitor -RunDirectory $out -Roles @('baselines') -NoProgress:$NoProgress
+$workers=@();$monitor=New-FederatedMonitor -RunDirectory $out -Roles @('baselines') -NoProgress:$NoProgress -Sites $sites -SiteLabels $siteLabels -StatusSeconds $StatusSeconds
 try {
     $limitText=($sites | ForEach-Object {$_+'='+$resolvedLimits[$_]}) -join ', '
-    Write-Host "Methods=$($Methods -join ','); Test=$Test; PatientLimits: $limitText (0=all); RebuildData=$RebuildData. Output: $out"
+    Write-Host "Methods=$($Methods -join ','); Test=$Test; PatientLimits: $limitText (0=all); Sequential site extraction: $($sites -join ' -> '); RebuildData=$RebuildData. Output: $out"
     $started=[DateTime]::UtcNow
-    $workers+=Start-FederatedRWorker -Runtime $runtime -Script (Join-Path $PSScriptRoot 'run-baselines.R') `
+    $deadline=$started.AddSeconds($RunTimeoutSeconds)
+    $baselineWorker=Start-FederatedRWorker -Runtime $runtime -Script (Join-Path $PSScriptRoot 'run-baselines.R') `
         -Arguments @($configFile) -WorkingDirectory $project -LogPrefix (Join-Path $roleOut 'run') -Role baselines
+    $workers+=,$baselineWorker
     Write-FederatedProcessMetadata $out $workers
-    $deadline=[DateTime]::UtcNow.AddSeconds($RunTimeoutSeconds);$finishedAt=$null
+    $finishedAt=$null
     $marker=Join-Path $out 'baselines-complete.json'
     while($true){
         Update-FederatedMonitor $monitor $workers
-        $worker=$workers[0];$worker.Process.Refresh()
+        $worker=$baselineWorker;$worker.Process.Refresh()
         if($worker.Process.HasExited){Wait-FederatedWorkers $workers 10 $monitor;break}
         if(-not $finishedAt -and (Test-Path -LiteralPath $marker)){$finishedAt=[DateTime]::UtcNow}
         if($finishedAt -and [DateTime]::UtcNow -ge $finishedAt.AddSeconds($ShutdownTimeoutSeconds)) {
@@ -131,7 +134,7 @@ try {
             BlockSize=$BlockSize;Alpha=$Alpha;Tolerance=$Tolerance;ExchangeTimeoutSeconds=$ExchangeTimeoutSeconds;
             InitialTimeoutSeconds=$InitialTimeoutSeconds;RunTimeoutSeconds=$remaining;
             DesignDirectory=(Join-Path $out 'prepared');WorkDirectory=(Join-Path $out 'federated-runtime');
-            InstallRoot=$InstallRoot;RHome=$RHome;JavaHome=$JavaHome;NoProgress=$NoProgress}
+            InstallRoot=$InstallRoot;RHome=$RHome;JavaHome=$JavaHome;NoProgress=$NoProgress;StatusSeconds=$StatusSeconds}
         if($ExchangeDirectory){$fed['ExchangeDirectory']=$ExchangeDirectory}
         & (Join-Path $PSScriptRoot 'Run-FederatedPS.ps1') @fed
         $remaining=$RunTimeoutSeconds-[int]([DateTime]::UtcNow-$started).TotalSeconds
@@ -155,11 +158,13 @@ try {
     [IO.File]::WriteAllText((Join-Path $out 'run-status.json'),'{"state":"failed"}')
     if($workers.Count){
         try {
-            $workers[0].Process.Refresh()
+            $live=@($workers | Where-Object { $_.Process.Refresh(); -not $_.Process.HasExited })
             $jcmd=Join-Path $env:JAVA_HOME 'bin\jcmd.exe'
-            if(-not $workers[0].Process.HasExited -and (Test-Path -LiteralPath $jcmd)) {
-                Invoke-RunDiagnosticThreadDump -Jcmd $jcmd -RuntimePid $workers[0].Process.Id `
-                    -OutputFile (Join-Path $out 'shutdown-thread.txt') -TimeoutSeconds 15
+            foreach($w in $live) {
+              if(Test-Path -LiteralPath $jcmd) {
+                Invoke-RunDiagnosticThreadDump -Jcmd $jcmd -RuntimePid $w.Process.Id `
+                    -OutputFile (Join-Path $out ("shutdown-thread-"+$w.Role+".txt")) -TimeoutSeconds 15
+              }
             }
         } catch {Write-Warning "Could not collect JVM thread diagnostics: $($_.Exception.Message)"}
     }

@@ -46,7 +46,18 @@ function Read-FederatedAppend($Cursor, [switch]$Final) {
 }
 function New-FederatedMonitor {
     param([string]$RunDirectory, [string[]]$Roles, [switch]$NoProgress,
-          [switch]$ReadOnly, [int]$StatusSeconds=15)
+          [switch]$ReadOnly, [int]$StatusSeconds=15,
+          [string[]]$Sites=@(), $SiteLabels=$null)
+    $siteStates=@()
+    foreach($site in $Sites) {
+        if($site -notmatch '^[0-9]+$'){throw 'Monitor site IDs must be numeric.'}
+        $label=$site
+        if($SiteLabels -is [Collections.IDictionary] -and $SiteLabels.Contains($site)){$label=[string]$SiteLabels[$site]}
+        elseif($null -ne $SiteLabels -and $SiteLabels.PSObject.Properties[$site]){$label=[string]$SiteLabels.$site}
+        $siteStates += [pscustomobject]@{Id=$site;Label=$label;Event=$null;State='queued';
+            Snapshots=@((Join-Path $RunDirectory ('baselines/sites/'+$site+'.json')),
+                (Join-Path $RunDirectory ($site+'/sites/'+$site+'.json')))}
+    }
     $states=@()
     foreach($role in $Roles) {
         $dir=Join-Path $RunDirectory $role
@@ -57,7 +68,7 @@ function New-FederatedMonitor {
             LastCpu=$null; LastCpuAt=$null; LastProcessId=$null; Cpu='?';
             ProcessState='not observed'; ObservedExitCode=$null; LastText='' }
     }
-    [pscustomobject]@{ Root=$RunDirectory; States=$states; Started=[DateTime]::UtcNow;
+    [pscustomobject]@{ Root=$RunDirectory; States=$states; SiteStates=$siteStates; Started=[DateTime]::UtcNow;
         LastRefresh=[DateTime]::MinValue; LastStatus=[DateTime]::MinValue;
         NoProgress=$NoProgress.IsPresent; ReadOnly=$ReadOnly.IsPresent; StatusSeconds=$StatusSeconds; Disabled=$false }
 }
@@ -88,21 +99,61 @@ function Write-FederatedProcessMetadata([string]$RunDirectory, [object[]]$Worker
         (New-Object Text.UTF8Encoding($false)))
     } catch { Write-Warning 'Process metadata unavailable; computation continues.' }
 }
-function Get-FederatedProgressDisplay($Event, [bool]$AllowEta=$true) {
+function Format-FederatedDuration([double]$Seconds) {
+    $s=[long][Math]::Max(0,[Math]::Floor($Seconds))
+    '{0:00}:{1:00}:{2:00}' -f [long][Math]::Floor($s/3600),[long][Math]::Floor(($s%3600)/60),($s%60)
+}
+function Get-FederatedProgressDisplay($Event, [bool]$AllowEta=$true,
+    [DateTime]$Now=[DateTime]::UtcNow, [bool]$AllowHistory=$true) {
     $percent=-1; $eta=-1; $description='No stage event yet; overall ETA unknown'
+    $short='Waiting for first event';$current='';$shortEta='unavailable'
     if ($null -ne $Event) {
         $description="$($Event.stage): $($Event.detail)"
-        if ($null -ne $Event.total -and $null -ne $Event.completed -and $Event.total -gt 0) {
+        $short=[string]$Event.stage;$current=[string]$Event.detail
+        if ($Event.unit -eq 'extraction steps (not time)') {
+            $description += " | extraction stage $($Event.completed)/$($Event.total) (not time %)"
+            $short="stage $($Event.completed)/$($Event.total)"
+        } elseif ($null -ne $Event.total -and $null -ne $Event.completed -and $Event.total -gt 0) {
             $percent=[int][Math]::Floor([Math]::Min(100,[Math]::Max(0,100.0*$Event.completed/$Event.total)))
             $description += " | $percent% ($($Event.completed)/$($Event.total) $($Event.unit))"
+            $short += " $percent% ($($Event.completed)/$($Event.total))"
         }
-        if ($AllowEta -and $null -ne $Event.etaSeconds -and $Event.etaSeconds -ge 0 -and
+        $op=$null
+        if($Event.PSObject.Properties['operation']){$op=$Event.operation}
+        if($null -ne $op) {
+            if($op.PSObject.Properties['statementCount']) {
+                $percent=[int][Math]::Floor(100.0*$op.statementsCompleted/$op.statementCount)
+                $description += " | SQL $($op.statementIndex)/$($op.statementCount), done $($op.statementsCompleted)/$($op.statementCount) = $percent% of statements"
+                $short += " | SQL $($op.statementIndex)/$($op.statementCount), done $($op.statementsCompleted)"
+                $current=$op.statementLabel
+            }
+            $elapsed=if($op.status -eq 'started'){Get-FederatedElapsedSeconds $Now (ConvertTo-FederatedUtc $op.startedUtc)}else{$op.elapsedSeconds}
+            $description += " | operation $($op.status), elapsed $(Format-FederatedDuration $elapsed)"
+            $short += " | $($op.status) $(Format-FederatedDuration $elapsed)"
+            if($null -ne $op.rowsAffected){$description += " | driver affected rows=$($op.rowsAffected)"}
+            if($null -ne $op.rowsFetched){$description += " | fetched rows=$($op.rowsFetched)"}
+            $history=$null
+            if($op.PSObject.Properties['historyEstimate']){$history=$op.historyEstimate}
+            if($op.status -eq 'started' -and $null -ne $op.sqlFile) {
+                if($AllowHistory -and $null -ne $history) {
+                    $remaining=[double]$history.seconds-$elapsed
+                    $description += " | historical operation duration ~$(Format-FederatedDuration $history.seconds) (n=$($history.samples))"
+                    if($remaining -gt 0) {
+                        $eta=[int][Math]::Min(2147483647,[Math]::Ceiling($remaining))
+                        $description += " | operation ETA ~$(Format-FederatedDuration $remaining)"
+                        $shortEta='~'+(Format-FederatedDuration $remaining)+' (history)'
+                    } else {$description += ' | historical duration exceeded; remaining ETA unavailable';$shortEta='unavailable (overrun)'}
+                } else {$description += ' | operation ETA unavailable (no usable matching history)'}
+                $description += ' | in-flight row progress unavailable'
+            }
+        } elseif ($AllowEta -and $null -ne $Event.etaSeconds -and $Event.etaSeconds -ge 0 -and
             $Event.unit -eq 'coordinates in this sweep') {
             $eta=[int][Math]::Min(2147483647,[Math]::Ceiling($Event.etaSeconds))
             $description += " | current-sweep ETA ~${eta}s"
+            $shortEta="~${eta}s (sweep)"
         } else { $description += ' | ETA unknown' }
     }
-    [pscustomobject]@{ Percent=$percent; Eta=$eta; Text=$description }
+    [pscustomobject]@{ Percent=$percent; Eta=$eta; Text=$description; Status=($short+' | ETA '+$shortEta); Operation=$current }
 }
 function Update-FederatedMonitor {
     param($Monitor, [object[]]$Workers=@(), [switch]$Force, [switch]$Final)
@@ -134,6 +185,11 @@ function Update-FederatedMonitor {
                     $s.StageSince=$s.LastEvent
                 }
                 $s.Event=$event; $s.LastText=''
+                if($event.PSObject.Properties['siteId'] -and $event.siteId) {
+                    foreach($site in $Monitor.SiteStates) {
+                        if($site.Id -ceq [string]$event.siteId){$site.Event=$event;$site.State=$event.siteState}
+                    }
+                }
             }
             $now=[DateTime]::UtcNow
             $worker=@($Workers | Where-Object { $_.Role -eq $s.Role })
@@ -196,14 +252,49 @@ function Update-FederatedMonitor {
             $eventAge=if($null -eq $s.LastEvent){'?'}else{[string](Get-FederatedElapsedSeconds $now $s.LastEvent)+'s'}
             $allowEta=($null -ne $s.LastEvent -and ($now-$s.LastEvent).TotalSeconds -lt 10 -and
                 -not $s.LastText -and $s.ProcessState.StartsWith('alive'))
-            $view=Get-FederatedProgressDisplay $s.Event $allowEta
+            $view=Get-FederatedProgressDisplay $s.Event $allowEta $now ($s.ProcessState.StartsWith('alive'))
             $line="[$($s.Role)] $($s.ProcessState); CPU(core)=$($s.Cpu); last log=${logAge}; last event=${eventAge}; step elapsed=$(Get-FederatedElapsedSeconds $now $s.StageSince)s | $($view.Text)"
             if ($s.LastText) { $line += " | $($s.LastText)" }
-            if ($statusDue) { Write-FederatedMonitorLine $Monitor $line }
-            if (-not $Monitor.NoProgress) {
-                Write-Progress -Id (100+$index) -ParentId 100 -Activity $s.Role -Status $view.Text `
-                    -CurrentOperation "$($s.ProcessState); CPU(core)=$($s.Cpu); last log=${logAge}" `
+            $siteRole=$s.Role -cin @($Monitor.SiteStates | ForEach-Object {$_.Id})
+            if ($statusDue -and -not $siteRole) { Write-FederatedMonitorLine $Monitor $line }
+            if (-not $Monitor.NoProgress -and -not $siteRole) {
+                Write-Progress -Id (100+$index) -ParentId 100 -Activity $s.Role -Status $view.Status `
+                    -CurrentOperation $view.Operation `
                     -PercentComplete $view.Percent -SecondsRemaining $view.Eta
+            }
+        }
+        $siteIndex=0
+        foreach($site in $Monitor.SiteStates) {
+            $siteIndex++
+            # Small snapshots let a viewer attached mid-run restore all sites,
+            # including sites whose last event is far back in a long fitting log.
+            foreach($snapshotPath in $site.Snapshots) {
+              if(Test-Path -LiteralPath $snapshotPath) {
+                try {
+                    $snapshot=Get-Content -LiteralPath $snapshotPath -Raw -Encoding UTF8 | ConvertFrom-Json
+                    if([string]$snapshot.siteId -ceq $site.Id -and
+                        ($null -eq $site.Event -or (ConvertTo-FederatedUtc $snapshot.timestamp) -ge (ConvertTo-FederatedUtc $site.Event.timestamp))) {
+                        $site.Event=$snapshot;$site.State=$snapshot.siteState
+                    }
+                } catch { } # A concurrent snapshot write is retried next refresh.
+              }
+            }
+            $role=if($null -ne $site.Event -and $site.Event.PSObject.Properties['role']){$site.Event.role}else{$site.Id}
+            $owner=@($Monitor.States | Where-Object {$_.Role -ceq $role})
+            $currentOwner=$owner.Count -and $null -ne $owner[0].Event -and
+                $owner[0].Event.PSObject.Properties['siteId'] -and [string]$owner[0].Event.siteId -ceq $site.Id -and
+                $site.State -notmatch '^(data-ready|local-complete)'
+            $alive=$currentOwner -and $owner[0].ProcessState.StartsWith('alive')
+            $fresh=$null -ne $site.Event -and ([DateTime]::UtcNow-(ConvertTo-FederatedUtc $site.Event.timestamp)).TotalSeconds -lt 10
+            $siteView=Get-FederatedProgressDisplay $site.Event ($alive -and $fresh) ([DateTime]::UtcNow) $alive
+            $siteText=if($null -eq $site.Event){'queued: extraction has not started'}else{"$($site.State) | $($siteView.Text)"}
+            if($currentOwner){$siteText += " | worker $($owner[0].ProcessState); CPU(core)=$($owner[0].Cpu)"}
+            $caption="site_id=$($site.Id) ($($site.Label))"
+            if($statusDue){Write-FederatedMonitorLine $Monitor "[$caption] $siteText"}
+            if(-not $Monitor.NoProgress) {
+                $siteStatus=if($null -eq $site.Event){'queued: extraction has not started'}else{"$($site.State) | $($siteView.Status)"}
+                Write-Progress -Id (200+$siteIndex) -ParentId 100 -Activity $caption -Status $siteStatus -CurrentOperation $siteView.Operation `
+                    -PercentComplete $siteView.Percent -SecondsRemaining $siteView.Eta
             }
         }
         $now=[DateTime]::UtcNow
@@ -224,5 +315,6 @@ function Update-FederatedMonitor {
 function Complete-FederatedMonitor($Monitor) {
     if ($null -eq $Monitor -or $Monitor.NoProgress) { return }
     for($i=1;$i -le $Monitor.States.Count;$i++) { Write-Progress -Id (100+$i) -Activity $Monitor.States[$i-1].Role -Completed }
+    for($i=1;$i -le $Monitor.SiteStates.Count;$i++) { Write-Progress -Id (200+$i) -Activity ('site_id='+$Monitor.SiteStates[$i-1].Id) -Completed }
     Write-Progress -Id 100 -Activity 'FederatedPS' -Completed
 }

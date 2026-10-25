@@ -1,3 +1,8 @@
+# v0.0.9 진행 표시 및 성능 업데이트
+
+기관별 상태, SQL 문장별 진행/경과 시간, 근거가 있는 작업 ETA,
+기관별 순차 추출과 적용 방법은 [PROGRESS_PERFORMANCE_KO.md](PROGRESS_PERFORMANCE_KO.md)를 참조하십시오.
+
 ## 0.0.8: 실행 방법 선택, 환자 제한, 추출 재사용
 
 현재 05번 실행 방법은 [METHODS_KO.md](METHODS_KO.md)를 먼저 읽으십시오.

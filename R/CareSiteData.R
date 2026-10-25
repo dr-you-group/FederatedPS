@@ -80,11 +80,7 @@
         }, sql = sql, completed = currentStep)
     }
     run <- function(sql, label = currentDetail) {
-        # Preserve executeSql's original batching/transaction behavior. In
-        # particular, do not create a new commit boundary for every statement.
-        .fpsDbOperation(paste(label, "SQL execution"),
-            DatabaseConnector::executeSql(connection, sql, progressBar = FALSE),
-            sql = sql, completed = currentStep)
+        .fpsExecuteSql(connection, sql, label, completed = currentStep)
     }
     execute <- function(file, ...) {
         path <- system.file("sql", "sql_server", file, package = "FederatedPs")
@@ -117,9 +113,11 @@
     partition <- query(sprintf("SELECT
         (SELECT COUNT_BIG(*) FROM #fps_person) AS exclusive_persons,
         (SELECT COUNT_BIG(*) FROM #fps_visit) AS linked_visits,
-        (SELECT COUNT_BIG(*) FROM #fps_membership WHERE institution_count > 1) AS multisite_persons_all_cdm,
+        (SELECT COUNT_BIG(*) FROM #fps_membership WHERE care_site_id <> last_care_site_id) AS multisite_persons_all_cdm,
         (SELECT COUNT_BIG(*) FROM %s.VISIT_OCCURRENCE WHERE care_site_id IS NULL OR care_site_id <= 0) AS unattributed_visits_all_cdm", schema))
     if (partition$exclusivePersons == 0) stop("No patients with visits exclusive to careSiteId ", careSiteId)
+    message("Exclusive persons: ", partition$exclusivePersons, "; linked visits: ", partition$linkedVisits,
+        "; multisite persons excluded (whole CDM): ", partition$multisitePersonsAllCdm)
     domains <- c("DRUG_EXPOSURE", "CONDITION_OCCURRENCE", "PROCEDURE_OCCURRENCE", "MEASUREMENT")
     linkage <- do.call(rbind, lapply(domains, function(table) {
         step(3, paste("Auditing visit linkage:", table))
@@ -127,13 +125,10 @@
             COALESCE(SUM(CAST(CASE WHEN v.visit_occurrence_id IS NULL THEN 1 ELSE 0 END AS BIGINT)), 0) AS excluded_records
             FROM %s.%s d JOIN #fps_person p ON p.person_id = d.person_id
             LEFT JOIN #fps_visit v ON v.visit_occurrence_id = d.visit_occurrence_id AND v.person_id = d.person_id", schema, table))
+        message(table, ": ", counts$excludedRecords, " / ", counts$candidateRecords,
+            " records excluded by visit linkage")
         data.frame(table = table, counts)
     }))
-    # Keep aggregate diagnostics in the role log even if later cohort checks fail.
-    message("Exclusive persons: ", partition$exclusivePersons, "; linked visits: ", partition$linkedVisits,
-        "; multisite persons excluded (whole CDM): ", partition$multisitePersonsAllCdm)
-    for (i in seq_len(nrow(linkage))) message(linkage$table[i], ": ", linkage$excludedRecords[i],
-        " / ", linkage$candidateRecords[i], " records excluded by visit linkage")
     specific <- settings$scenario == "studySpecific"
     ingredients <- list("1" = settings$targetIngredients, "0" = settings$comparatorIngredients)
     atc <- list("1" = settings$targetAtc, "0" = settings$comparatorAtc)

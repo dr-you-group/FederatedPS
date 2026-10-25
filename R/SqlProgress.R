@@ -1,0 +1,60 @@
+# Execute the same SqlRender statements as DatabaseConnector::executeSql's
+# default (runAsBatch=FALSE) path. Keep its single final JDBC commit when
+# auto-commit is off; calling executeSql once per statement would change that.
+.fpsSqlStatementLabel <- function(sql) {
+    marker <- regmatches(sql, regexec("-- fps-step: ([^\r\n]+)", sql))[[1L]]
+    if (length(marker) > 1L) return(trimws(marker[2]))
+    plain <- gsub("/\\*.*?\\*/", " ", sql, perl = TRUE)
+    plain <- gsub("--[^\r\n]*", " ", plain)
+    temp <- function(pattern) {
+        match <- regmatches(plain, regexec(pattern, plain, ignore.case = TRUE, perl = TRUE))[[1L]]
+        if (length(match) > 1L) match[2] else NULL
+    }
+    name <- temp("\\bCREATE\\s+(?:UNIQUE\\s+)?(?:CLUSTERED\\s+|NONCLUSTERED\\s+)?INDEX\\s+([A-Za-z0-9_]+)")
+    if (!is.null(name)) return(paste("Create index", name))
+    name <- temp("\\bINTO\\s+(#[A-Za-z0-9_]+)")
+    if (!is.null(name)) return(paste("Populate", name))
+    name <- temp("\\b(?:UPDATE|DELETE\\s+FROM|TRUNCATE\\s+TABLE|DROP\\s+TABLE)\\s+(#[A-Za-z0-9_]+)")
+    if (!is.null(name)) return(paste("Modify temporary table", name))
+    # No arbitrary SQL/literals in console events. The full SQL stays local.
+    "Execute rendered cohort statement (see SQL file)"
+}
+
+.fpsRunSqlStatements <- function(statements, label, completed, execute, finish = function() NULL) {
+    if (!length(statements)) return(invisible(numeric()))
+    labels <- vapply(statements, .fpsSqlStatementLabel, "")
+    # Some SqlRender versions strip comments. Keep the known seven-statement
+    # partition labels explicit without changing SQL or using institution names.
+    if (identical(label, "SitePartition.sql") && length(statements) == 7L)
+        labels <- c("Aggregate all positive-site visits by patient (patient cap not applied)",
+            "Index patient-to-institution membership", "Select patients exclusive to this site",
+            "Index exclusive patients", "Copy all visits of exclusive patients at this site",
+            "Index visits by visit_occurrence_id", "Index visits by person_id")
+    batchId <- sprintf("%04d-%s", getOption("FederatedPs.dbOperationIndex", 0L) + 1L,
+        gsub("[^A-Za-z0-9_-]+", "-", label))
+    batchStartedUtc <- format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")
+    .fpsDiagnosticWrite(paste0(batchId, "-plan.tsv"), c("statement\ttotal\twork",
+        paste(seq_along(statements), length(statements), labels, sep = "\t")))
+    result <- numeric()
+    for (i in seq_along(statements)) {
+        info <- list(batch = label, batchId = batchId, batchStartedUtc = batchStartedUtc,
+            statementIndex = i, statementCount = length(statements), statementLabel = labels[i])
+        value <- .fpsDbOperation(sprintf("%s SQL %d/%d: %s", label, i, length(statements), labels[i]),
+            execute(statements[i]), sql = statements[i], completed = completed, statement = info)
+        result <- c(result, value)
+    }
+    .fpsDbOperation(paste(label, "finalize SQL batch"), finish(), completed = completed)
+    invisible(result)
+}
+
+.fpsExecuteSql <- function(connection, sql, label, completed) {
+    if (!DBI::dbIsValid(connection)) stop("Connection is closed")
+    .fpsRunSqlStatements(SqlRender::splitSql(sql), label, completed,
+        execute = function(statement) DBI::dbExecute(connection, statement),
+        finish = function() {
+            if (inherits(connection, "DatabaseConnectorJdbcConnection") &&
+                !rJava::.jcall(connection@jConnection, "Z", "getAutoCommit"))
+                rJava::.jcall(connection@jConnection, "V", "commit")
+            invisible(NULL)
+        })
+}

@@ -3,6 +3,7 @@
 param(
     [ValidateSet('Synthetic','SyntheticCDM','Database','Design')][string]$Mode = 'Synthetic',
     [switch]$NoProgress,
+    [ValidateRange(1,3600)][int]$StatusSeconds = 15,
     [bool]$Test = $false,
     [ValidateSet('YUHS','Example')][string]$Dataset = 'YUHS',
     [string[]]$Sites = @(),
@@ -101,7 +102,7 @@ $configFile = Join-Path $output 'run.json'
 [IO.File]::WriteAllText($configFile, ($config | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false)))
 Invoke-FederatedR $runtime.Rscript @((Join-Path $PSScriptRoot 'preflight.R'), $configFile)
 $workers = @()
-$monitor = New-FederatedMonitor -RunDirectory $output -Roles (@('aggregator') + $Sites + @('verification')) -NoProgress:$NoProgress
+$monitor = New-FederatedMonitor -RunDirectory $output -Roles (@('aggregator') + $Sites + @('verification')) -NoProgress:$NoProgress -StatusSeconds $StatusSeconds
 $runStarted = [DateTime]::UtcNow
 try {
     # Site workers load connection settings themselves. The aggregator must not

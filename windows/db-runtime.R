@@ -16,6 +16,14 @@ fp_configure_db_runtime <- function(config, out) {
     options(FederatedPs.sqlDiagnosticsDirectory = directory,
             FederatedPs.smallQueryTimeoutSeconds = fp_timeout_value(config, "smallQueryTimeout", 60),
             errorReportFileLocation = directory)
+    site <- basename(out)
+    settings <- if (identical(config$dataset, "YUHS")) "yuhs.Renviron" else paste0(site, ".Renviron")
+    settingsPath <- file.path(config$configDirectory, settings)
+    options(FederatedPs.progressContext = list(site = site, study = config$study, scenario = config$scenario,
+        patientLimit = config$patientLimits[[site]],
+        connectionHash = unname(tools::md5sum(settingsPath)),
+        package = as.character(utils::packageVersion("FederatedPs")),
+        driver = as.character(utils::packageVersion("DatabaseConnector"))))
     invisible(directory)
 }
 

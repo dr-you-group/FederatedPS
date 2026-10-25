@@ -1,3 +1,8 @@
+# v0.0.9 업데이트
+
+기관별 진행 표시와 순차 추출은 [PROGRESS_PERFORMANCE_KO.md](PROGRESS_PERFORMANCE_KO.md)를 참조하십시오.
+`-StatusSeconds 10`으로 10초 간격 상태 기록을 선택할 수 있습니다.
+
 # YUHS 실행 방법·환자 제한·추출 재사용 (0.0.8)
 
 이 안내는 05번 YUHS 실행에 관한 이전 안내보다 우선합니다. 기존 Windows 폐쇄망 환경의

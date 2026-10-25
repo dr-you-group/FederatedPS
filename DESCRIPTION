@@ -1,6 +1,6 @@
 Package: FederatedPs
 Title: Plaintext Federated Propensity Scores with Cyclops
-Version: 0.0.8
+Version: 0.0.9
 Authors@R: person("Younwoo", "Ki", email = "dewonsunrise@gmail.com",
     role = c("aut", "cre"))
 Description: Fits a plaintext federated propensity score model with the
@@ -16,6 +16,7 @@ Imports:
     CohortMethod (>= 6.0.3),
     Cyclops (>= 3.7.1),
     DatabaseConnector,
+    DBI,
     dplyr,
     FeatureExtraction,
     Matrix,
