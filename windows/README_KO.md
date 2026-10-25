@@ -1,7 +1,12 @@
-# v0.0.10 세 기관 병렬 추출 업데이트
+# 전처리 우선 실행기 핫픽스 (0.0.10, 2026-10-26)
+
+기본 전처리를 단일 R 프로세스로 변경했습니다. 모든 기관 전처리 후 모델을 실행합니다.
+적용 방법과 0.0.10 캐시 호환성은 [PREPROCESS_FIRST_KO.md](PREPROCESS_FIRST_KO.md)를 먼저 읽으십시오.
+
+## v0.0.10 최초 배포 안내
 
 기관별 상태, SQL 문장별 진행/경과 시간, 근거가 있는 작업 ETA,
-기본 3개 기관 병렬 추출(`-ExtractionWorkers 1~3`)과 적용 방법은 [PROGRESS_PERFORMANCE_KO.md](PROGRESS_PERFORMANCE_KO.md)를 참조하십시오.
+기관별 추출 옵션(`-ExtractionWorkers 1~3`)과 진행 표시의 상세 설명은 [PROGRESS_PERFORMANCE_KO.md](PROGRESS_PERFORMANCE_KO.md)를 참조하십시오.
 
 ## 0.0.8: 실행 방법 선택, 환자 제한, 추출 재사용
 

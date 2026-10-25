@@ -15,7 +15,7 @@ param($Methods,[bool]$Test=$true,$BlockSize,$Alpha,$PatientLimit,$PatientLimits,
 '@ | Set-Content (Join-Path $temp 'Run-YUHS-Methods.ps1')
     $run=Join-Path $temp 'Run-YUHS.ps1'
     $default=& $run
-    if($default.workers -ne 3){throw 'Default parallel worker count was not forwarded'}
+    if($default.workers -ne 1){throw 'Default sequential preprocessing was not forwarded'}
     if($default.mode -ne 'SelectedMethods' -or -not $default.test -or ($default.methods -join ',') -ne 'federated'){throw 'Default selection broken'}
     foreach($selection in @('local-only','pooled','federated','local-only,pooled','local-only,federated','pooled,federated','local-only,pooled,federated')){
         $m=$selection.Split(',');$r=& $run -Methods $m -Test $false -BlockSize 4 -Alpha 0.5 -PatientLimit 200 -PatientLimits @{2=100;3=300} -CacheDirectory 'fixture-cache' -RebuildData -StatusSeconds 10 -ExtractionWorkers 3

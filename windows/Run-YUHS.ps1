@@ -7,7 +7,7 @@ param(
     [string]$CacheDirectory='', [switch]$RebuildData,
     [switch]$NoProgress,
     [ValidateRange(1,3600)][int]$StatusSeconds = 15,
-    [ValidateRange(1,3)][int]$ExtractionWorkers = 3,
+    [ValidateRange(1,3)][int]$ExtractionWorkers = 1,
     [bool]$Test = $true,
     [string]$Study = 'ppi',
     [ValidateSet('default','studySpecific')][string]$Scenario = 'default',

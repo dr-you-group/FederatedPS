@@ -20,7 +20,7 @@ param(
     [ValidateRange(1,3600)][int]$ShutdownTimeoutSeconds=60,
     [string]$RunId=([guid]::NewGuid().ToString('N')), [switch]$NoProgress,
     [ValidateRange(1,3600)][int]$StatusSeconds=15,
-    [ValidateRange(1,3)][int]$ExtractionWorkers=3,
+    [ValidateRange(1,3)][int]$ExtractionWorkers=1,
     [string]$ConfigDirectory='', [string]$WorkDirectory='', [string]$ExchangeDirectory='',
     [string]$InstallRoot='C:\FederatedPS',
     [string]$RHome='C:\Program Files\R\R-4.6.1', [string]$JavaHome=''
@@ -99,6 +99,7 @@ $dbWatchdog=New-FederatedDbWatchdog -RunDirectory $out -RunId $RunId -Sites $sit
 try {
     $limitText=($sites | ForEach-Object {$_+'='+$resolvedLimits[$_]}) -join ', '
     Write-Host "Methods=$($Methods -join ','); Test=$Test; PatientLimits: $limitText (0=all); ExtractionWorkers=$effectiveWorkers; site queue: $($sites -join ' -> '); RebuildData=$RebuildData. Output: $out"
+    if($effectiveWorkers -eq 1){Write-Host 'Preprocessing first: one R process prepares each site in order; all site inputs are validated before model fitting.'}
     $started=[DateTime]::UtcNow
     $deadline=$started.AddSeconds($RunTimeoutSeconds)
     if($effectiveWorkers -gt 1) {

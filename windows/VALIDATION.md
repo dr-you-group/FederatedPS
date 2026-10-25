@@ -1,3 +1,18 @@
+## 0.0.10 preprocessing-first launcher hotfix (2026-10-26)
+
+Default ExtractionWorkers is 1 again. The existing single R baseline worker prepares
+all configured sites in order, validates all designs, and only then fits selected
+models, matching the 0.0.8 execution order. Explicit 2/3 still select the prior parallel path.
+No new startup recovery/retry scheduler is included. R package sources, SQL, DESCRIPTION
+and all R runtime files remain byte-identical to b245ded; completed 0.0.10 cache keys
+are preserved. The 180-second startup guard remains scoped to each site's actual DB start.
+
+PowerShell checks cover default/explicit routing, all seven method selections,
+completion barriers, monitor behavior and startup-clock isolation. Update tests
+check apply/reapply, modified-file and tamper rejection, rollback, configuration
+preservation and the bundle wrapper default. Actual Windows/HIWARE/SQL Server
+integration and the cause of the reported startup delay remain unverified.
+
 ## 0.0.10 bounded parallel extraction and DB startup watchdog
 
 Validated on 2026-10-26 with Linux R 4.3.3 and PowerShell 7.4.6:
