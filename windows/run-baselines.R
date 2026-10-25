@@ -15,6 +15,7 @@ options(FederatedPs.progress = function(event) {
 progress <- utils::getFromNamespace(".fpsProgress", "FederatedPs")
 
 extract_site <- function(site) {
+    patientLimit <- config$patientLimits[[site]]
     context$label <- paste("extract", site)
     out <- file.path(config$output, "extraction", site)
     dir.create(out, recursive = TRUE, showWarnings = FALSE)
@@ -30,7 +31,7 @@ extract_site <- function(site) {
             file.path(config$configDirectory, "yuhs.Renviron")), config)
         fp_get_db_study_data(connectionDetails = details,
             cdmDatabaseSchema = Sys.getenv("CDM_DATABASE_SCHEMA"), study = config$study,
-            scenario = config$scenario, careSiteId = config$careSites[[site]], patientLimit = config$patientLimit)
+            scenario = config$scenario, careSiteId = config$careSites[[site]], patientLimit = patientLimit)
     }
     on.exit(Andromeda::close(data))
     progress("population", "Preparing the same CohortMethod population used by the federated run")
@@ -38,15 +39,16 @@ extract_site <- function(site) {
         createStudyPopulationArgs = CohortMethod::createCreateStudyPopulationArgs(
             removeSubjectsWithPriorOutcome = FALSE, minDaysAtRisk = 0))
     population <- fp_attach_person_ids(population, dplyr::collect(data$cohorts))
-    if (isTRUE(config$test)) population <- fp_limit_synthetic_population(population, config$patientLimit)
-    if (config$patientLimit > 0L && nrow(population) > config$patientLimit) stop("Patient cap exceeded")
+    if (isTRUE(config$test)) population <- fp_limit_synthetic_population(population, patientLimit)
+    if (patientLimit > 0L && nrow(population) > patientLimit) stop("Patient cap exceeded")
     population$careSiteId <- config$careSites[[site]]
     attr(population, "metaData")$careSiteId <- config$careSites[[site]]
     attr(population, "metaData")$synthetic <- isTRUE(config$test)
+    attr(population, "metaData")$patientLimit <- patientLimit
     metadata <- attr(data, "metaData")
     if (isTRUE(config$test)) {
-        metadata$studyDefinition$patientLimit <- as.integer(config$patientLimit)
-        metadata$studyDefinition$samplingPolicy <- if (config$patientLimit > 0L)
+        metadata$patientLimit <- as.integer(patientLimit)
+        metadata$samplingPolicy <- if (patientLimit > 0L)
             "deterministic alternating synthetic treatment arms; smoke test only" else "all candidates"
     }
     saveRDS(metadata, file.path(out, "extraction-metadata.rds"))
@@ -65,14 +67,17 @@ main <- function() {
     stopifnot(identical(config$mode, "SelectedMethods"), identical(config$dataset, "YUHS"),
         length(config$methods) > 0L, !anyDuplicated(config$methods),
         all(config$methods %in% c("local-only", "pooled", "federated")))
-    if (isTRUE(config$test)) fp_check_synthetic_yuhs(config)
-    else FederatedPs::getStudySettings(config$study, config$scenario)
+    if (isTRUE(config$test)) {
+        stopifnot(identical(config$study,"ppi"),identical(config$scenario,"default"),
+            length(config$sites)==3L,setequal(config$sites,c("1","2","3")),
+            all(vapply(config$sites,function(site) config$careSites[[site]] == as.integer(site),TRUE)))
+    } else FederatedPs::getStudySettings(config$study, config$scenario)
     cat("Selected methods:", paste(config$methods, collapse = ", "), "\n")
     cat("PS are in-sample; fixed Laplace variance", config$priorVariance, "; no cross-validation.\n")
-    contract <- fp_data_contract(config)
     cacheRecords <- list()
     designs <- list()
     for (site in config$sites) {
+        contract <- fp_data_contract(config,site=site)
         cached <- if (isTRUE(config$rebuildData)) NULL else fp_cache_read(config$cacheDirectory,contract,site)
         if (!is.null(cached)) {
             context$label <- paste("reuse",site)

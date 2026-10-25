@@ -45,6 +45,22 @@ error(fp_cache_read(out,contract,"severance"),"checksum")
 # Rebuild writes a fresh generation without changing/destroying old one.
 newPath <- fp_cache_write(out,contract,"severance",design)
 stopifnot(newPath!=path,dir.exists(path),identical(fp_cache_read(out,contract,"severance")$design,design))
+# Limits belong to the individual site key, not the shared model contract.
+perSite <- config;perSite$sites <- c("1","2","3");perSite$careSites <- list(`1`=1,`2`=2,`3`=3);perSite$patientLimits <- list(`1`=20,`2`=10,`3`=30)
+one <- fp_data_contract(perSite,runtimeVersions=c(FederatedPs="fixture"),site="1")
+two <- fp_data_contract(perSite,runtimeVersions=c(FederatedPs="fixture"),site="2")
+perSite$patientLimits[["2"]] <- 40
+stopifnot(identical(one,fp_data_contract(perSite,runtimeVersions=c(FederatedPs="fixture"),site="1")),
+    !identical(two,fp_data_contract(perSite,runtimeVersions=c(FederatedPs="fixture"),site="2")))
+siteNames <- c("1","2","3")
+differentLimits <- setNames(lapply(seq_along(siteNames),function(i){
+    d <- .prepareSyntheticYuhsTables(cdm,i)
+    p <- fp_limit_synthetic_population(d$cohorts,c(20,10,30)[i])
+    m <- d$metaData;m$patientLimit <- c(20,10,30)[i]
+    fp_baseline_design(p,d$covariates,d$covariateRef,d$analysisRef,m,siteNames[i])
+}),siteNames)
+fp_baseline_validate_sites(differentLimits)
+stopifnot(nrow(fp_baseline_pool(differentLimits)$x)==60)
 unlink(out,recursive=TRUE)
 sql <- paste(readLines("inst/sql/sql_server/LimitPatients.sql"),collapse="\n")
 stopifnot(grepl("TOP (@patient_limit)",sql,fixed=TRUE),grepl("PARTITION BY subject_id",sql,fixed=TRUE),

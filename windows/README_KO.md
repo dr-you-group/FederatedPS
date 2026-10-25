@@ -1,8 +1,8 @@
 ## 0.0.8: 실행 방법 선택, 환자 제한, 추출 재사용
 
 현재 05번 실행 방법은 [METHODS_KO.md](METHODS_KO.md)를 먼저 읽으십시오.
-`-Methods local-only,pooled -PatientLimit 200`으로 기관당 최대 200명 후보를
-사용할 수 있습니다. 완료된 기관별 추출은 자동 재사용하고 `-RebuildData`로 새로 추출합니다.
+`-Methods local-only,pooled -PatientLimits @{1=200; 2=100; 3=300}`처럼
+기관별 후보 환자 상한을 각각 지정할 수 있습니다. 완료된 기관별 추출은 자동 재사용하고 `-RebuildData`로 새로 추출합니다.
 이번 버전은 08_UPDATE_PACKAGE로 FederatedPs만 업데이트해야 합니다.
 
 ## 0.0.7 연결 점검 종료 핫픽스

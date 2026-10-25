@@ -3,8 +3,9 @@
 param(
     [ValidateSet('local-only','pooled','federated')][string[]]$Methods=@('local-only','pooled'),
     [ValidateRange(0,2147483647)][int]$PatientLimit=0,
+    [hashtable]$PatientLimits=@{},
     [string]$CacheDirectory='', [switch]$RebuildData,
-    [string[]]$Sites=@('severance','gangnam','yongin'),
+    [string[]]$Sites=@(),
     [bool]$Test=$true, [string]$Study='ppi',
     [ValidateSet('default','studySpecific')][string]$Scenario='default',
     [ValidateRange(1,1000000)][int]$BlockSize=1,
@@ -28,9 +29,37 @@ $project=Get-FederatedProject
 if($PatientLimit -eq 1){throw 'PatientLimit must be 0 (unlimited) or at least 2 per institution.'}
 if(-not $Methods.Count -or @($Methods | Sort-Object -Unique).Count -ne $Methods.Count){throw 'Select distinct Methods.'}
 $Methods=@($Methods | ForEach-Object { $_.ToLowerInvariant() })
+if(-not $ConfigDirectory){$ConfigDirectory=Join-Path $PSScriptRoot 'config'}
+$mappingPath=Join-Path $ConfigDirectory 'yuhs-sites.json'
+if(-not(Test-Path -LiteralPath $mappingPath)){$mappingPath=Join-Path $PSScriptRoot 'config\yuhs-sites.json'}
+$mapping=Get-Content -LiteralPath $mappingPath -Raw -Encoding UTF8 | ConvertFrom-Json
+$careSites=[ordered]@{};$siteLabels=[ordered]@{}
+foreach($property in $mapping.PSObject.Properties){
+    $id=0L
+    if(-not [long]::TryParse([string]$property.Value,[ref]$id) -or $id -lt 1 -or $id -gt 2147483647){throw 'yuhs-sites.json must map labels to positive integer CARE_SITE_IDs.'}
+    $key=$id.ToString([Globalization.CultureInfo]::InvariantCulture)
+    if($careSites.Contains($key)){throw 'Duplicate CARE_SITE_ID in yuhs-sites.json.'}
+    $careSites[$key]=[int]$id;$siteLabels[$key]=$property.Name
+}
+$known=@($careSites.Keys)
+if(-not $Sites.Count){$Sites=@($known)}
 Assert-FederatedNames $RunId $Sites
-$known=@('severance','gangnam','yongin')
-if($Sites.Count -ne 3 -or @($Sites | Where-Object {$_ -cnotin $known}).Count){throw 'Method comparison requires all three YUHS sites.'}
+if($Sites.Count -ne $known.Count -or @($Sites | Where-Object {$_ -cnotin $known}).Count){throw 'Sites must be all configured CARE_SITE_IDs, not institution names.'}
+if($Test -and ($Sites.Count -ne 3 -or @($Sites | Where-Object {$_ -notin @('1','2','3')}).Count)){
+    throw 'The bundled synthetic sample supports only CARE_SITE_IDs 1, 2, 3.'
+}
+$resolvedLimits=[ordered]@{}
+foreach($site in $Sites){$resolvedLimits[$site]=$PatientLimit}
+foreach($key in $PatientLimits.Keys){
+    $site=[string]$key
+    $value=$PatientLimits[$key];$parsed=0L
+    if($site -notin $known){throw "Unknown PatientLimits site_id: $key"}
+    if($null -eq $value -or $value -is [bool] -or -not [long]::TryParse([string]$value,[ref]$parsed) -or
+        $parsed -lt 0 -or $parsed -eq 1 -or $parsed -gt 2147483647){
+        throw "PatientLimits[$key] must be 0 (unlimited) or an integer of at least 2."
+    }
+    $resolvedLimits[$site]=[int]$parsed
+}
 $sites=$Sites
 if($Test -and ($Study -cne 'ppi' -or $Scenario -ne 'default')) { throw 'Test=true supports only ppi/default.' }
 if(-not $ConfigDirectory){$ConfigDirectory=Join-Path $PSScriptRoot 'config'}
@@ -48,9 +77,9 @@ New-Item -ItemType Directory -Path $out | Out-Null
 $roleOut=Join-Path $out 'baselines'
 New-Item -ItemType Directory -Path $roleOut | Out-Null
 $config=[ordered]@{project=$project; runId=$RunId; mode='SelectedMethods'; methods=$Methods; dataset='YUHS'; test=$Test;
-    sites=$sites; careSites=(Get-Content (Join-Path $PSScriptRoot 'config\yuhs-sites.json') -Raw | ConvertFrom-Json);
+    sites=$sites; careSites=$careSites; siteLabels=$siteLabels;
     study=$Study; scenario=$Scenario; blockSize=$BlockSize; alpha=$Alpha; tolerance=$Tolerance;
-    patientLimit=$PatientLimit; cacheDirectory=[IO.Path]::GetFullPath($CacheDirectory); rebuildData=[bool]$RebuildData;
+    patientLimits=$resolvedLimits; cacheDirectory=[IO.Path]::GetFullPath($CacheDirectory); rebuildData=[bool]$RebuildData;
     maxIterations=5000; priorVariance=1; smallQueryTimeout=$SmallQueryTimeoutSeconds;
     dbQueryTimeout=$DbQueryTimeoutSeconds; runTimeout=$RunTimeoutSeconds; shutdownTimeout=$ShutdownTimeoutSeconds;
     output=$out; configDirectory=[IO.Path]::GetFullPath($ConfigDirectory);
@@ -59,7 +88,8 @@ $configFile=Join-Path $out 'run.json'
 [IO.File]::WriteAllText($configFile,($config | ConvertTo-Json -Depth 5),(New-Object Text.UTF8Encoding($false)))
 $workers=@();$monitor=New-FederatedMonitor -RunDirectory $out -Roles @('baselines') -NoProgress:$NoProgress
 try {
-    Write-Host "Methods=$($Methods -join ','); Test=$Test; PatientLimit=$PatientLimit per site (0=all); RebuildData=$RebuildData. Output: $out"
+    $limitText=($sites | ForEach-Object {$_+'='+$resolvedLimits[$_]}) -join ', '
+    Write-Host "Methods=$($Methods -join ','); Test=$Test; PatientLimits: $limitText (0=all); RebuildData=$RebuildData. Output: $out"
     $started=[DateTime]::UtcNow
     $workers+=Start-FederatedRWorker -Runtime $runtime -Script (Join-Path $PSScriptRoot 'run-baselines.R') `
         -Arguments @($configFile) -WorkingDirectory $project -LogPrefix (Join-Path $roleOut 'run') -Role baselines
@@ -79,7 +109,7 @@ try {
     }
     if(-not(Test-Path -LiteralPath $marker)){throw 'R exited without verified baseline results.'}
     $complete=Get-Content -LiteralPath $marker -Raw | ConvertFrom-Json
-    $expectedModels=$(if('local-only' -in $Methods){3}else{0})+$(if('pooled' -in $Methods){1}else{0})
+    $expectedModels=$(if('local-only' -in $Methods){$sites.Count}else{0})+$(if('pooled' -in $Methods){1}else{0})
     if($complete.runId -cne $RunId -or $complete.state -cne 'results-validated' -or $complete.models -ne $expectedModels -or
         (@($complete.methods) -join ',') -cne ($Methods -join ',') -or
         (@($complete.sites) -join ',') -cne ($sites -join ',')){throw 'Invalid baseline completion record.'}

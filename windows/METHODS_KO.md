@@ -16,7 +16,7 @@ PowerShell에서 실행합니다. 경로가 다르면 실제 경로로 바꾸십
     .\APPLY_UPDATE.ps1 -BundleRoot 'C:\FederatedPS_YUHS_Offline'
     cd C:\FederatedPS_YUHS_Offline
     .\08_UPDATE_PACKAGE.ps1
-    .\05_RUN_YUHS.ps1 -Test $false -Methods local-only,pooled -PatientLimit 200
+    .\05_RUN_YUHS.ps1 -Test $false -Methods local-only,pooled -PatientLimits @{1=200; 2=200; 3=200}
 }
 ```
 
@@ -33,7 +33,8 @@ PowerShell에서 실행합니다. 경로가 다르면 실제 경로로 바꾸십
 | `-Methods federated` | 세 기관과 aggregator로 연합 모델 학습 |
 | `-Methods local-only,pooled` | 위 두 방법만 실행; aggregator를 시작하지 않음 |
 | `-Methods local-only,pooled,federated` | 같은 추출 데이터로 세 방법 모두 실행 |
-| `-PatientLimit 200` | **기관당 후보 환자 최대 200명**, 전체 최대 600명 |
+| `-PatientLimits @{1=200; 2=100; 3=300}` | **기관별 상한 개별 지정**(예: 세브란스 200, 강남 100, 용인 300명) |
+| `-PatientLimit 200` | 세 기관 공통 기본 상한 200명; PatientLimits의 기관별 값이 우선 |
 | `-PatientLimit 0` | 제한 없음(기본값) |
 | `-Test $false` | 실제 YUHS DB; 최초 추출 때 HIWARE 연결 필요 |
 | `-Test $true` | DB 접속 없는 합성 CDM(기본값, 원본 120명/기관) |
@@ -41,16 +42,21 @@ PowerShell에서 실행합니다. 경로가 다르면 실제 경로로 바꾸십
 | `-CacheDirectory 'D:\YUHS_cache'` | 추출 캐시 위치 지정; 재사용할 때도 같은 경로 사용 |
 
 Methods는 비어 있지 않은 어떤 조합이든 가능합니다. 생략하면 federated만 실행합니다.
+PatientLimits에서 생략한 기관은 PatientLimit 값을 사용하며, 둘 다 생략하면 0(무제한)입니다.
+키는 `yuhs-sites.json`에 등록된 **CARE_SITE_ID(site_id)**이며 현재 1, 2, 3입니다.
+기관명을 옵션에 하드코딩하지 않습니다. ID와 표시명은 설정 파일에서 읽습니다.
+각 상한 값은 0 또는 2 이상의 정수여야 합니다. 세 기관을 모두 명시하면 의도하지 않은 전체 추출을 피할 수 있습니다.
+
 PowerShell 콘솔에서 쉼표로 나누거나 `-Methods @('local-only','pooled')`를 사용하십시오.
 
-실제 DB를 빠르게 시험하려면 `-Test $false -PatientLimit 200`을 함께 지정합니다.
+실제 DB를 빠르게 시험하려면 `-Test $false`와 기관별 `-PatientLimits`를 함께 지정합니다.
 Test=true는 실제 DB의 작은 표본이 아니라 별도로 만든 합성 자료입니다.
 
 환자 제한은 사이트별 연구 노출 후보가 만들어진 뒤, **CohortMethod 생성 전에** 적용합니다.
 가장 이른 노출의 군을 기준으로 두 군을 번갈아 선택하고 군 안에서는 PERSON_ID 순서로
 선택하는 결정적 시험 표본입니다. 선정 환자의 모든 노출 행을 보존해 기존 첫 노출/교차 노출/
 관찰기간/나이/세척기간 규칙을 그대로 적용합니다. 최종 환자는 200명보다 적을 수 있으며,
-한 군이 비면 실패합니다. 이때 PatientLimit을 늘리십시오. 임상 기준을 자동으로 완화하지 않습니다.
+한 군이 비면 실패합니다. 이때 해당 기관의 상한을 늘리십시오. 임상 기준을 자동으로 완화하지 않습니다.
 이는 대표성 있는 무작위 표본이 아니므로 전체 연구 결과로 해석하지 마십시오.
 
 기관 분리, 방문 연결 감사, 약물 개념/노출 후보 조회는 제한 적용 전에 수행합니다.
@@ -67,8 +73,9 @@ Test=true는 실제 DB의 작은 표본이 아니라 별도로 만든 합성 자
 - 기존 화면의 **CohortMethod 6/10 완료만으로는 충분하지 않습니다.** 뒤의 공변량 전송과
   분석 대상자 구성까지 끝나 `CACHE SAVED`가 기록되어야 합니다.
 - 이미 끝난 이전 버전 실행에는 이 체크포인트가 없으므로 자동 변환/재사용하지 않습니다.
-- 연구·scenario·실제/합성 구분·기관 매핑·PatientLimit·DB 설정·추출 소스·관련 패키지 버전이
-  달라지면 다른 캐시를 사용합니다. 200명 캐시를 제한 없는 실행에서 재사용하지 않습니다.
+- 연구·scenario·실제/합성 구분·기관 매핑·해당 기관의 환자 상한·DB 설정·추출 소스·관련 패키지 버전이
+  달라지면 다른 캐시를 사용합니다. **한 기관의 상한만 바꾸면 그 기관만 다시 추출**합니다.
+  200명 캐시를 제한 없는 실행에서 재사용하지 않습니다.
 - Methods, BlockSize, Alpha를 바꿔도 같은 추출 캐시를 재사용할 수 있습니다. 모델은 새로 학습합니다.
   중단된 Cyclops 반복 계산 자체를 이어서 실행하는 기능은 아닙니다.
 - DB 내용이 같은 주소에서 갱신된 사실은 자동 감지하지 못합니다. 최신 데이터를 다시 읽으려면
@@ -79,27 +86,27 @@ Test=true는 실제 DB의 작은 표본이 아니라 별도로 만든 합성 자
 예: 200명 시험 결과를 만든 다음, 추출을 재사용해서 federated만 실행:
 
 ```powershell
-.\05_RUN_YUHS.ps1 -Test $false -Methods federated -PatientLimit 200
+.\05_RUN_YUHS.ps1 -Test $false -Methods federated -PatientLimits @{1=200; 2=200; 3=200}
 ```
 
 예: 최신 전체 데이터로 local-only와 pooled 실행:
 
 ```powershell
-.\05_RUN_YUHS.ps1 -Test $false -Methods local-only,pooled -PatientLimit 0 -RebuildData
+.\05_RUN_YUHS.ps1 -Test $false -Methods local-only,pooled -PatientLimits @{1=0; 2=0; 3=0} -RebuildData
 ```
 
 ## 결과와 로그
 
 기본 결과 폴더는 `FederatedPS\work\methods\<RunId>`입니다. 화면에도 절대 경로를 표시합니다.
 
-- `local\severance`, `local\gangnam`, `local\yongin`: 기관별 모델
+- `local\1`, `local\2`, `local\3`: 기관별 모델
 - `pooled`: 합쳐서 학습한 모델
-- `federated\<기관>`: 동일 환자에 다시 매핑하고 검증한 연합 결과
+- `federated\<site_id>`: 동일 환자에 다시 매핑하고 검증한 연합 결과
 - 각 모델 폴더의 `result.rds`(환자별 PS), `model.rds`, `coefficients.csv`
 - `summary.csv`: 선택 방법의 인원·변수·반복·학습시간 요약
 - `baselines\run.stdout.log`, `run.stderr.log`, `progress.jsonl`, 루트 `monitor.log`
 - `data-cache.json`: 기관별 재사용 여부·체크포인트 위치·환자 수
-- `extraction\<기관>\sql-diagnostics`: 새 추출의 SQL 단계와 오류
+- `extraction\<site_id>\sql-diagnostics`: 새 추출의 SQL 단계와 오류
 - `federated-runtime\<RunId>`: federated를 선택했을 때 집계기/기관별 원래 실행 로그
 - `SUCCESS.txt`: 선택한 모든 모델 검증과 R 프로세스의 정상 종료를 확인한 뒤 생성
 
@@ -123,5 +130,5 @@ PowerShell에서 모든 7개 Methods 조합과 환자/캐시 옵션 전달, 단�
 native 수치 통합 시험은 수행하지 못했습니다. 현장에서 DB 없이 실행 경로를 먼저 확인하려면:
 
 ```powershell
-.\05_RUN_YUHS.ps1 -Test $true -Methods local-only,pooled,federated -PatientLimit 20
+.\05_RUN_YUHS.ps1 -Test $true -Methods local-only,pooled,federated -PatientLimits @{1=20; 2=20; 3=20}
 ```

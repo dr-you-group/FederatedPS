@@ -236,10 +236,9 @@
     settings$exposureSource <- "visit-linked drug_exposure (not pooled drug_era)"
     settings$featureDefinition <- "care-site-binary-v1"
     settings$partitionPolicy <- "exclude persons visiting multiple positive care_site_ids"
-    settings$patientLimit <- patientLimit
-    settings$samplingPolicy <- if (patientLimit > 0L)
-        "deterministic alternating earliest-exposure arms before CohortMethod; smoke test only" else "all candidates"
     attr(data, "metaData") <- list(targetId = 1, comparatorId = 2, studyDefinition = settings,
+        patientLimit = patientLimit, samplingPolicy = if (patientLimit > 0L)
+            "deterministic alternating earliest-exposure arms before CohortMethod; smoke test only" else "all candidates",
         resolvedIngredients = resolved, careSite = institution, sitePartition = partition,
         recordLinkage = linkage, attrition = data.frame(description = "Site-local study-eligible subjects",
             targetPersons = counts[1], comparatorPersons = counts[2],

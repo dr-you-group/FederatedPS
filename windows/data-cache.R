@@ -6,7 +6,7 @@ fp_object_md5 <- function(value) {
     unname(tools::md5sum(path))
 }
 
-fp_data_contract <- function(config, runtimeVersions = NULL) {
+fp_data_contract <- function(config, runtimeVersions = NULL, site = NULL) {
     if (is.null(runtimeVersions)) runtimeVersions <- vapply(
         c("FederatedPs", "CohortMethod", "Andromeda", "DatabaseConnector"),
         function(p) as.character(utils::packageVersion(p)), "")
@@ -25,8 +25,10 @@ fp_data_contract <- function(config, runtimeVersions = NULL) {
     connectionHash <- if (isTRUE(config$test)) "synthetic-no-database" else
         unname(tools::md5sum(file.path(config$configDirectory,"yuhs.Renviron")))
     if (anyNA(connectionHash)) stop("Cannot fingerprint database settings")
+    limit <- if (is.null(site)) config$patientLimit else config$patientLimits[[site]]
+    if (length(limit) != 1L || !is.numeric(limit) || is.na(limit)) stop("Missing per-site patient limit")
     list(format=1L, test=isTRUE(config$test), study=config$study, scenario=config$scenario,
-        sites=config$sites, careSites=config$careSites, patientLimit=as.integer(config$patientLimit),
+        sites=config$sites, careSites=config$careSites, site=site, patientLimit=as.integer(limit),
         connectionHash=connectionHash, sources=hashes, runtime=runtimeVersions)
 }
 

@@ -69,6 +69,10 @@ function Write-FederatedProcessMetadata {param($Directory,$Workers)}
     & $run -RunId default -WorkDirectory $work
     $c=Get-Content (Join-Path $work 'default/run.json') -Raw | ConvertFrom-Json
     if(-not $c.test -or $c.mode -ne 'SelectedMethods' -or $c.priorVariance -ne 1){throw 'Wrong defaults'}
+    foreach($limits in @(@{other=200},@{2=1},@{1=-1},@{3=2.5},@{2=$null},@{3=$true},@{severance=200})){
+        $bad=$false;try{& $run -PatientLimits $limits -WorkDirectory $work}catch{$bad=$_.Exception.Message -match 'PatientLimits'}
+        if(-not $bad){throw 'Invalid per-site limit accepted'}
+    }
     $caught=$false
     try{& $run -Test $false}catch{$caught=$_.Exception.Message -match 'yuhs.Renviron'}
     if(-not $caught){throw 'Real mode ignored missing config'}
@@ -77,9 +81,9 @@ function Write-FederatedProcessMetadata {param($Directory,$Workers)}
     $i=0
     foreach($selection in $selections){
         $i++;$methods=$selection.Split(',');$id='choice'+$i
-        & $run -Methods $methods -Test $false -RunId $id -WorkDirectory $work -BlockSize 4 -Alpha 0.5 -PatientLimit 200 -CacheDirectory (Join-Path $temp 'cache') -RebuildData
+        & $run -Methods $methods -Test $false -RunId $id -WorkDirectory $work -BlockSize 4 -Alpha 0.5 -PatientLimit 200 -PatientLimits @{2=100;3=300} -CacheDirectory (Join-Path $temp 'cache') -RebuildData
         $out=Join-Path $work $id;$c=Get-Content (Join-Path $out 'run.json') -Raw | ConvertFrom-Json
-        if($c.test -or $c.blockSize -ne 4 -or $c.alpha -ne 0.5 -or $c.patientLimit -ne 200 -or -not $c.rebuildData){throw 'Real routing/settings lost'}
+        if($c.test -or $c.blockSize -ne 4 -or $c.alpha -ne 0.5 -or $c.patientLimits.'1' -ne 200 -or $c.patientLimits.'2' -ne 100 -or $c.patientLimits.'3' -ne 300 -or -not $c.rebuildData){throw 'Real routing/settings lost'}
         if(-not(Test-Path (Join-Path $out 'SUCCESS.txt'))){throw 'Missing success'}
         foreach($pair in @(@('local-only','local'),@('pooled','pooled'),@('federated','federated-runtime'))){
             if((Test-Path (Join-Path $out $pair[1])) -ne ($pair[0] -in $methods)){throw 'Wrong selected output'}
@@ -97,5 +101,10 @@ function Write-FederatedProcessMetadata {param($Directory,$Workers)}
         try{& $run -Methods local-only,pooled,federated -Test $false -Study $id -RunId $id -WorkDirectory $work}catch{$caught=$_.Exception.Message -match $case[1]}
         if(-not $caught -or (Test-Path (Join-Path $work "$id/SUCCESS.txt"))){throw "Failed completion accepted: $id"}
     }
+    # IDs are read from configuration, never from hard-coded institution names.
+    '{"alphaLabel":17,"betaLabel":42,"gammaLabel":99}' | Set-Content (Join-Path $temp 'config/yuhs-sites.json')
+    & $run -Test $false -RunId customids -WorkDirectory $work -PatientLimits @{17=12;42=24;99=36}
+    $c=Get-Content (Join-Path $work 'customids/run.json') -Raw | ConvertFrom-Json
+    if(($c.sites -join ',') -ne '17,42,99' -or $c.patientLimits.'42' -ne 24 -or $c.careSites.'99' -ne 99){throw 'Hard-coded site names or limits'}
     Write-Host 'PASS: seven method combinations; one extraction worker; prepared federation; settings; native failures and missing/stale completion rejected.'
 } finally {Remove-Item -LiteralPath $temp -Recurse -Force}
