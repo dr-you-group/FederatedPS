@@ -52,7 +52,7 @@ if($global:FailFreshUpdate){throw 'fixture package update failure'}
     if(-not $synthetic.test -or ($synthetic.methods -join ',') -ne 'local-only,pooled'){throw 'Synthetic route touched real DB mode.'}
 
     # SETUP preserves order and stops immediately on an installation error.
-    # Post-install updates must check integrity and invoke the pure-R updater,
+    # Post-install updates bypass bundle integrity and invoke the pure-R updater,
     # preserving the install root without recompiling Cyclops/dependencies.
     $updateRoot=Join-Path $temp 'update-fixture'
     New-Item -ItemType Directory -Path (Join-Path $updateRoot 'support') -Force | Out-Null
@@ -61,20 +61,21 @@ if($global:FailFreshUpdate){throw 'fixture package update failure'}
     @'
 function Assert-FreshWindows { $global:FreshCalls.Add('windows') }
 function Assert-FreshNoR { $global:FreshCalls.Add('no-r') }
-function Test-FreshManifest { param($Root); $global:FreshCalls.Add('integrity'); if($global:FailFreshCheck){throw 'fixture bad integrity'} }
+function Test-FreshManifest { throw 'Package update must not invoke bundle integrity checks' }
 function Get-FreshJavaHome { 'fixture-java' }
 '@ | Set-Content (Join-Path $updateRoot 'support/Fresh.Common.ps1')
     @'
 param($InstallRoot,$JavaHome)
 if($InstallRoot -ne 'fixture-install' -or $JavaHome -ne 'fixture-java'){throw 'Update lost runtime paths'}
 $global:FreshCalls.Add('pure-r-update')
+if($global:FailFreshCheck){throw 'fixture package install failure'}
 '@ | Set-Content (Join-Path $updateRoot 'FederatedPS/windows/Update-FederatedPs.ps1')
     $global:FreshCalls.Clear()
     & (Join-Path $updateRoot '10_UPDATE_PACKAGE.ps1') -InstallRoot fixture-install
-    if(($global:FreshCalls -join ',') -ne 'windows,no-r,integrity,pure-r-update'){throw 'Wrong update sequence'}
+    if(($global:FreshCalls -join ',') -ne 'windows,no-r,pure-r-update'){throw 'Wrong update sequence'}
     $global:FreshCalls.Clear();$global:FailFreshCheck=$true
     $caught=$false;try { & (Join-Path $updateRoot '10_UPDATE_PACKAGE.ps1') -InstallRoot fixture-install } catch {$caught=$true}
-    if(-not $caught -or 'pure-r-update' -in $global:FreshCalls){throw 'Update ignored failed integrity'}
+    if(-not $caught -or 'pure-r-update' -notin $global:FreshCalls){throw 'Package installer failure was not propagated'}
     $global:FailFreshCheck=$false
 
     Copy-Item (Join-Path $fresh 'SETUP.ps1') $temp

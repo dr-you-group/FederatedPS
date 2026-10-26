@@ -264,3 +264,24 @@ R installer는 CRAN 공식 MD5, Java MSI는 공급자 SHA-256과 대조했고 �
 `-UpdatePackage`는 FederatedPs만 갱신하며, 실패하면 분석을 시작하지 않습니다.
 R/RStudio를 닫은 뒤 실행합니다. 일반 RUN은 설치된 패키지를 사용하므로,
 R/inst 소스 수정 후에는 이 옵션 또는 `10_UPDATE_PACKAGE.ps1`가 필요합니다.
+
+
+## 덮어쓰기 업데이트와 자동 재설치
+
+최신 누적 패치의 APPLY_FIX.ps1은 기존 RUN/소스의 해시·편집 여부·이전 배포 버전을
+비교하지 않고 패치에 포함된 파일로 덮어씁니다. 기존 파일을 patch-backups에 백업한 뒤,
+현재 설치된 의존성을 사용해 FederatedPs를 자동 재설치합니다. RUN은 기관별 2명으로 갱신됩니다.
+
+```powershell
+# 패치 폴더에서 실행; 완료 시 R 패키지 재설치까지 끝납니다.
+.\APPLY_FIX.ps1 -BundleRoot 'C:\FP'
+Set-Location 'C:\FP'
+.\RUN.ps1
+```
+
+`10_UPDATE_PACKAGE.ps1`도 전체 번들/설치 파일의 해시 검사를 호출하지 않습니다.
+기존 설치가 정상이라면 설치 EXE/패키지 ZIP 전체를 다시 준비할 필요가 없습니다.
+`00_VERIFY.ps1`은 반입/최초 설치 검사로 남으며, APPLY_FIX·10_UPDATE_PACKAGE·RUN에서는 호출하지 않습니다.
+R/RStudio는 재설치 전에 닫아 둡니다. 재설치 자체가 실패하면 성공으로 표시하거나
+분석을 시작하지 않고 해당 설치 오류를 출력합니다. 별도 설치 경로를 사용했다면
+APPLY_FIX에 `-InstallRoot '<설치 경로>'`도 전달합니다.

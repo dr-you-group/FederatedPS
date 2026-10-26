@@ -355,3 +355,10 @@ To reproduce the wire test, set `FPS_TEST_R` to the R executable (accepts --file
 
 
 Fresh integrity policy now reports local script/package-source edits instead of treating them as damaged installation payloads. `00_VERIFY.ps1 -StrictSource` retains pristine-source checks. Immutable installers, dependency archives/locks, runtime-lock, provenance and git bundle still fail on mismatches. RUN -UpdatePackage applies package edits before preflight/analysis and stops if update fails. PowerShell fixtures cover local R/SQL/RUN edits and deletion, unchanged manifest, immutable tampering, required files, unsafe paths and update-order/failure gates.
+
+
+## Overwrite update / automatic package reinstall
+
+Apply-FreshPatch.ps1 is distributed as APPLY_FIX.ps1. It overwrites supplied release files, including locally edited RUN/R/SQL files, without comparing existing file hashes, base-release fingerprints or old manifests. It backs up old files and invokes Update-FederatedPs.ps1 directly to reinstall the pure-R package. 10_UPDATE_PACKAGE no longer calls Test-FreshManifest. Local DB settings and analysis-data paths remain outside patch payloads.
+
+PowerShell filesystem fixtures exercised arbitrary edits, an invalid old manifest and deliberately wrong checksum fields (accepted), repeat overwrite, automatic installer invocation, installer failure propagation, missing payload refusal before writes, mid-copy rollback, and path/data boundaries. Fresh launcher regressions verify no bundle-integrity call from package updates. Actual Windows R installation and HIWARE execution remain environment-side validation.

@@ -17,14 +17,13 @@ DBeaver에서 같은 주소와 계정으로 조회가 된다는 것은 유용한
 
 ## 적용과 실행
 
-실행 중인 분석 및 R/RStudio를 종료하고 패치 폴더에서 다음을 실행합니다. 기존 RUN의 환자 상한만 2/2/2로 편집한 경우 패치가 이를 인식하여 백업합니다. 새 RUN은 각 기관 기본 2명이고 옵션으로 상한을 바꿀 수 있습니다.
+실행 중인 분석 및 R/RStudio를 종료하고 패치 폴더에서 다음을 실행합니다. APPLY_FIX는 기존 파일의 해시나 편집 여부를 비교하지 않고 제공된 파일로 덮어쓴 뒤 FederatedPs를 자동 재설치합니다. RUN은 기관별 2명 설정으로 갱신되며 기존 파일은 patch-backups에 백업됩니다.
 
 ```powershell
 & {
     $ErrorActionPreference = 'Stop'
     .\APPLY_FIX.ps1 -BundleRoot 'C:\FP'
     Set-Location 'C:\FP'
-    .\10_UPDATE_PACKAGE.ps1
     .\07_CHECK_DB.ps1
     .\RUN.ps1
 }
@@ -59,7 +58,7 @@ RUN 실패: 출력된 run 폴더에 대해 `09_COLLECT_DIAGNOSTICS.ps1 -RunDirec
 ## 함께 수정한 integrity failure
 
 실행 옵션/소스를 직접 수정하면 원본 SHA-256과 달라지는 것은 정상입니다.
-Fresh 기본 검사는 수정 가능한 스크립트·R/SQL 코드의 변경을 표시하고 허용합니다.
+APPLY_FIX와 10_UPDATE_PACKAGE는 번들 무결성 검사를 호출하지 않습니다. 기존 파일의 편집 여부와 해시 차이는 업데이트를 막지 않습니다.
 설치 파일, 의존성, runtime-lock, git bundle은 계속 검증합니다.
 원본과 모든 소스의 일치를 확인하려면 `00_VERIFY.ps1 -StrictSource`를 사용합니다.
 수정한 패키지 소스를 설치까지 반영하려면 `RUN.ps1 -UpdatePackage` 또는
