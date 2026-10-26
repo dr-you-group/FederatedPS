@@ -1,0 +1,46 @@
+source("windows/common.R")
+source("windows/jdbc-driver.R")
+project <- normalizePath(".")
+root <- tempfile(); dir.create(root)
+lock <- jsonlite::fromJSON("windows/runtime-lock.json")
+default <- file.path(root,"installed");dir.create(file.path(default,"sqlserver",lock$sqlServerActiveDirectory),recursive=TRUE)
+defaultJar <- file.path(default,"sqlserver",lock$sqlServerActiveDirectory,lock$sqlServerActiveJar)
+file.create(defaultJar)
+# Folder names with spaces and non-ASCII text must work with readRenviron.
+custom <- file.path(root,"DBeaver 드라이버");dir.create(custom)
+customJar <- file.path(custom,"mssql-jdbc-7.4.1.jre8.jar");file.create(customJar)
+config <- file.path(root,"yuhs.Renviron")
+Sys.setenv(FEDERATEDPS_DEFAULT_JAR_FOLDER=default,DATABASECONNECTOR_JAR_FOLDER=default)
+Sys.unsetenv("DB_JDBC_JAR")
+norm <- function(p) normalizePath(p,winslash="/",mustWork=TRUE)
+stopifnot(identical(fp_resolve_jdbc(project,config),norm(defaultJar)))
+writeLines(paste0('DATABASECONNECTOR_JAR_FOLDER="',custom,'"'),config,useBytes=TRUE)
+stopifnot(identical(fp_resolve_jdbc(project,config),norm(customJar)))
+# No extra /sqlserver is appended when the folder already contains the JAR.
+legacy <- file.path(custom,"mssql-jdbc-9.2.0.jre8.jar");file.create(legacy)
+stopifnot(inherits(try(fp_resolve_jdbc(project,config),silent=TRUE),"try-error"))
+writeLines(paste0('DB_JDBC_JAR="',customJar,'"'),config,useBytes=TRUE)
+stopifnot(identical(fp_resolve_jdbc(project,config),norm(customJar)))
+writeLines('DB_JDBC_JAR="DBeaver 드라이버/mssql-jdbc-7.4.1.jre8.jar"',config,useBytes=TRUE)
+stopifnot(identical(fp_resolve_jdbc(project,config),norm(customJar)))
+# Conventional root/sqlserver layout still resolves without a second suffix.
+conventional <- file.path(root,"legacy-layout");dir.create(file.path(conventional,"sqlserver"),recursive=TRUE)
+file.copy(customJar,file.path(conventional,"sqlserver",basename(customJar)))
+writeLines(paste0('DATABASECONNECTOR_JAR_FOLDER="',conventional,'"'),config)
+stopifnot(identical(fp_resolve_jdbc(project,config),norm(file.path(conventional,"sqlserver",basename(customJar)))))
+# An explicit missing path is an error, never a silent switch back to 9.2.
+writeLines('DB_JDBC_JAR="missing.jar"',config)
+stopifnot(inherits(try(fp_resolve_jdbc(project,config),silent=TRUE),"try-error"))
+# Settings in a custom config directory take precedence over inherited defaults.
+writeLines(paste0('DB_JDBC_JAR="',customJar,'"'),config,useBytes=TRUE)
+Sys.setenv(DB_JDBC_JAR=legacy)
+stopifnot(identical(fp_resolve_jdbc(project,config),norm(customJar)),
+          identical(Sys.getenv("DB_JDBC_JAR"),legacy))
+# Connection details receive a folder; the selected JAR is preloaded first.
+options(FederatedPs.jdbcResolver=function(path) norm(customJar),
+        FederatedPs.jdbcDriverInfo=list(jar=norm(customJar)))
+stopifnot(identical(fp_yuhs_driver_path(config),norm(custom)))
+options(FederatedPs.jdbcDriverInfo=list(jar=norm(legacy)))
+stopifnot(inherits(try(fp_yuhs_driver_path(config),silent=TRUE),"try-error"))
+unlink(root,recursive=TRUE)
+cat("PASS: Renviron folder/exact-file selection, custom paths, precedence, relative/non-ASCII paths, restart required for loaded JVM changes\n")

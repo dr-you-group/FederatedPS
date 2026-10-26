@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parent; REPO=ROOT.parents[1]
 R=Path(os.environ.get('FPS_TEST_R','R'))
 JAR=Path(os.environ['FPS_TEST_JDBC']).resolve()
-assert JAR.is_file(), 'Set FPS_TEST_JDBC to the pinned mssql-jdbc-9.2.0.jre8.jar'
+assert JAR.is_file(), 'Set FPS_TEST_JDBC to a Microsoft mssql-jdbc JAR'
 def exact(c,n):
  b=b''
  while len(b)<n:
@@ -80,4 +80,4 @@ def run(mode,case,rows=1):
 for n in (0,1,2):run('new','normal',n)
 for case in ('late-error','missing-terminal'):
  for mode in ('old','new'):run(mode,case)
-print('PASS: production R/rJava with pinned Microsoft 9.2 driver: bounded rows, UTF-8/NULL, EOF, terminal errors, no hidden commands, small-only full buffering, incomplete responses fail before cleanup.')
+print('PASS: production R/rJava with '+JAR.name+': bounded rows, UTF-8/NULL, EOF, terminal errors, no hidden commands, small-only full buffering, incomplete responses fail before cleanup.')

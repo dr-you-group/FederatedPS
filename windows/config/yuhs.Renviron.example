@@ -7,3 +7,9 @@ DB_DATABASE=CDM54_2601
 DB_USER=
 DB_PASSWORD=
 CDM_DATABASE_SCHEMA=CDM54_2601.CDM
+
+# Optional: use the same SQL Server JDBC as DBeaver. Use forward slashes.
+# Set ONE of these. DB_JDBC_JAR chooses an exact file, even in a mixed folder.
+# DATABASECONNECTOR_JAR_FOLDER=C:/FederatedPS/jdbc/sqlserver/dbeaver-7.4.1
+# DB_JDBC_JAR=C:/FederatedPS/jdbc/sqlserver/dbeaver-7.4.1/mssql-jdbc-7.4.1.jre8.jar
+# When omitted, the bundled 7.4.1 driver is selected.

@@ -8,7 +8,7 @@ fp_check_names <- function(run_id, sites) {
 
 fp_verify_db_runtime_revision <- function(installedRevision = tryCatch(
         utils::getFromNamespace(".fpsDbRuntimeRevision", "FederatedPs"), error = function(e) NULL)) {
-    if (!identical(installedRevision, "jdbc-probe-3"))
+    if (!identical(installedRevision, "jdbc-probe-4"))
         stop("Installed FederatedPs lacks the JDBC probe fix. Run 10_UPDATE_PACKAGE.ps1 ",
              "(or windows/Update-FederatedPs.ps1), then start a new R process.")
     invisible(TRUE)
@@ -21,13 +21,14 @@ fp_verify_sql_plan_revision <- function(installedRevision = tryCatch(
     invisible(TRUE)
 }
 
-fp_verify_runtime <- function(project) {
+fp_verify_runtime <- function(project, configDirectory = file.path(project, "windows", "config")) {
     lock <- jsonlite::fromJSON(file.path(project, "windows", "runtime-lock.json"))
     if (.Platform$OS.type != "windows" || .Machine$sizeof.pointer != 8L ||
         as.character(getRversion()) != lock$rVersion)
         stop("This deployment requires Windows x64 R ", lock$rVersion)
     lib <- Sys.getenv("FEDERATEDPS_LIBRARY")
     if (!nzchar(lib) || !dir.exists(lib)) stop("Start through the Windows launcher to configure the offline library")
+    fp_configure_jdbc(project, file.path(configDirectory, "yuhs.Renviron"))
     packages <- c("FederatedPs", "Cyclops", "CohortMethod", "Andromeda", "DatabaseConnector",
                   "FeatureExtraction", "dplyr", "Matrix", "pda", "rlang", "SqlRender", "rJava")
     for (pkg in packages) {
@@ -49,13 +50,8 @@ fp_verify_runtime <- function(project) {
     # Rprofile runs before default packages (including utils) are attached.
     if (!identical(utils::getFromNamespace(".protocolVersion", "FederatedPs"), lock$protocol))
         stop("FederatedPs protocol differs from runtime-lock.json")
-    jar <- Sys.getenv("DATABASECONNECTOR_JAR_FOLDER")
-    if (!nzchar(jar) || !dir.exists(jar)) stop("DATABASECONNECTOR_JAR_FOLDER is missing")
-    if (!file.exists(file.path(jar, "sqlserver", lock$sqlServerJar)))
-        stop("SQL Server JDBC missing; transfer the new payload and run Install-Offline.ps1")
-    rJava::.jinit()
     if (!"ppi" %in% FederatedPs::listStudies()$study) stop("Study metadata missing")
-    cat("PASS: offline R, block Cyclops, FederatedPs, JVM and JDBC [jdbc-probe-3; sql-plan-4]\n")
+    cat("PASS: offline R, block Cyclops, FederatedPs, JVM and JDBC [jdbc-probe-4; sql-plan-4]\n")
     invisible(TRUE)
 }
 
@@ -108,7 +104,7 @@ fp_read_yuhs_connection <- function(path) {
     }
     encrypt <- tls_value("DB_ENCRYPT", "true")
     trust <- tls_value("DB_TRUST_SERVER_CERTIFICATE", "false")
-    driver <- file.path(Sys.getenv("DATABASECONNECTOR_JAR_FOLDER"), "sqlserver")
+    driver <- fp_yuhs_driver_path(path)
     if (!length(list.files(driver, "^mssql-jdbc.*[.]jar$"))) stop("Offline SQL Server JDBC missing")
     DatabaseConnector::createConnectionDetails(dbms = "sql server", server = values$DB_SERVER,
         port = as.integer(values$DB_PORT), user = values$DB_USER, password = values$DB_PASSWORD,
@@ -152,4 +148,26 @@ fp_control <- function(config) {
     Cyclops::createControl(convergenceType = "lange", seed = 1L, threads = 1L,
         noiseLevel = "silent", maxIterations = 5000L, tolerance = config$tolerance,
         blockSize = config$blockSize, alpha = config$alpha)
+}
+
+# Read JDBC settings before any JVM driver class is loaded.
+fp_configure_jdbc <- function(project, connectionFile) {
+    source(file.path(project, "windows", "jdbc-driver.R"), local = environment())
+    fp_load_jdbc_driver(project, connectionFile = connectionFile)
+}
+
+fp_yuhs_driver_path <- function(connectionFile) {
+    resolver <- getOption("FederatedPs.jdbcResolver")
+    if (!is.function(resolver)) {
+        project <- Sys.getenv("FEDERATEDPS_PROJECT")
+        if (!nzchar(project)) stop("Start with the Windows launcher to set FEDERATEDPS_PROJECT")
+        source(file.path(project, "windows", "jdbc-driver.R"), local = environment())
+        fp_load_jdbc_driver(project, connectionFile = connectionFile)
+        resolver <- getOption("FederatedPs.jdbcResolver")
+    }
+    jar <- resolver(connectionFile)
+    loaded <- getOption("FederatedPs.jdbcDriverInfo")
+    if (!is.null(loaded) && !identical(tolower(loaded$jar), tolower(jar)))
+        stop("The JDBC setting changed after JVM startup. Close R/RStudio and start a new process.")
+    dirname(jar)
 }

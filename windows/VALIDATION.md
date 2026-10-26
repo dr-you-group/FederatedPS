@@ -362,3 +362,23 @@ Fresh integrity policy now reports local script/package-source edits instead of 
 Apply-FreshPatch.ps1 is distributed as APPLY_FIX.ps1. It overwrites supplied release files, including locally edited RUN/R/SQL files, without comparing existing file hashes, base-release fingerprints or old manifests. It backs up old files and invokes Update-FederatedPs.ps1 directly to reinstall the pure-R package. 10_UPDATE_PACKAGE no longer calls Test-FreshManifest. Local DB settings and analysis-data paths remain outside patch payloads.
 
 PowerShell filesystem fixtures exercised arbitrary edits, an invalid old manifest and deliberately wrong checksum fields (accepted), repeat overwrite, automatic installer invocation, installer failure propagation, missing payload refusal before writes, mid-copy rollback, and path/data boundaries. Fresh launcher regressions verify no bundle-integrity call from package updates. Actual Windows R installation and HIWARE execution remain environment-side validation.
+
+## Renviron JDBC selection (jdbc-probe-4, 2026-10-26)
+
+- `test-renviron-jdbc.R`: Renviron overrides the PowerShell fallback; explicit JAR,
+  direct folder and conventional root/sqlserver layout; missing/ambiguous paths;
+  relative and Unicode/space-containing paths; changed setting requires a new JVM.
+- `test-jdbc-driver-load.R`: actual Microsoft 7.4.1 and 9.2 JARs, each in a fresh
+  R/rJava/JVM process. The selected code-source path is retained when the other
+  JAR is later added. Switching an already loaded driver is rejected with a
+  restart instruction, rather than silently using the previous class.
+- Actual 7.4.1 loopback TDS probes: 0/1/2 rows, Korean text, NULL, split packets,
+  trailing SQL error and missing terminal response. No hidden SET ROWCOUNT.
+  No reproduced normal-response getString hang in this controlled fixture.
+- PowerShell isolated driver installation/replacement test, overwrite updater
+  regression and Fresh bundle routing checks pass. Existing custom configuration
+  and results are not part of the patch payload. No old-source hash gate added.
+- Validation runtime: Linux R 4.3.3 / rJava 1.0.11 / Java 17. This does not certify
+  the Windows R 4.6.1 / HIWARE / actual YUHS SQL Server combination. The previous
+  code's fixed-driver/path behavior is verified; a JDBC 9.2 defect is not proven
+  by the user's last-phase watchdog message alone.

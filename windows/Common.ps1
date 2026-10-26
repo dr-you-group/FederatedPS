@@ -57,7 +57,9 @@ function Set-FederatedEnvironment {
     $env:FP_LIB = $env:R_LIBS_USER
     $env:FEDERATEDPS_LIBRARY = $overlay
     $env:JAVA_HOME = $JavaHome
-    $env:DATABASECONNECTOR_JAR_FOLDER = $jdbc
+    $env:FEDERATEDPS_PROJECT = Get-FederatedProject
+    $env:FEDERATEDPS_DEFAULT_JAR_FOLDER = $jdbc
+    if (-not $env:DATABASECONNECTOR_JAR_FOLDER) { $env:DATABASECONNECTOR_JAR_FOLDER = $jdbc }
     $env:PATH = (Join-Path $JavaHome 'bin') + ';' + $env:PATH
     $env:OMP_NUM_THREADS = '1'
     $env:OPENBLAS_NUM_THREADS = '1'

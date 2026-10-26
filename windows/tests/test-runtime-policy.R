@@ -1,8 +1,8 @@
 # Policy regression: TLS preservation, timeout routing and no automatic retry.
 source("windows/db-runtime.R")
 source("windows/common.R")
-stopifnot(fp_verify_db_runtime_revision("jdbc-probe-3"))
-for (revision in list(NULL,"jdbc-probe-1","jdbc-probe-2","0.0.10"))
+stopifnot(fp_verify_db_runtime_revision("jdbc-probe-4"))
+for (revision in list(NULL,"jdbc-probe-1","jdbc-probe-2","jdbc-probe-3","0.0.10"))
     stopifnot(inherits(try(fp_verify_db_runtime_revision(revision),silent=TRUE),"try-error"))
 stopifnot(fp_verify_sql_plan_revision("sql-plan-4"))
 for (revision in list(NULL,"sql-plan-2","sql-plan-3","0.0.10"))

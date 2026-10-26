@@ -63,3 +63,16 @@ APPLY_FIX와 10_UPDATE_PACKAGE는 번들 무결성 검사를 호출하지 않습
 원본과 모든 소스의 일치를 확인하려면 `00_VERIFY.ps1 -StrictSource`를 사용합니다.
 수정한 패키지 소스를 설치까지 반영하려면 `RUN.ps1 -UpdatePackage` 또는
 `10_UPDATE_PACKAGE.ps1` 후 RUN을 실행합니다. manifest를 임의로 삭제/재작성하지 않습니다.
+
+
+## jdbc-probe-4: Renviron 기반 JDBC 선택
+
+이번 변경은 timeout 증가나 자동 재시도를 추가하지 않습니다.
+`windows/config/yuhs.Renviron`의 `DATABASECONNECTOR_JAR_FOLDER` 또는 `DB_JDBC_JAR`를
+드라이버 클래스 로딩 전에 읽고, 그 JAR을 명시적으로 로드합니다.
+고정 9.2 파일 존재 검사를 제거하고 기본 7.4.1 파일을 별도 디렉터리에 배포합니다.
+이미 다른 드라이버가 로드된 R 세션은 재시작이 필요합니다. 실제 class code-source 경로를
+출력하므로 "파일은 교체했으나 JVM은 구버전을 사용"하는 경우를 구별할 수 있습니다.
+CARE_SITE 문자열 조회는 여전히 정상적으로 읽고 검증하며, 실패 시 행/열 번호를 기록합니다.
+정확한 사용법은 `windows/fresh/README_KO.md`의 JDBC 경로 절을 참조하십시오.
+9.2 자체의 문제인지 HIWARE·JVM·rJava의 상호작용인지 이 실행 로그만으로 단정하지 않습니다.

@@ -16,6 +16,7 @@ restore <- function() {
     unlink(temp, recursive = TRUE)
 }
 Sys.setenv(DATABASECONNECTOR_JAR_FOLDER = temp)
+fp_yuhs_driver_path <- function(path) driver
 base <- c('DBMS="sql server"', "DB_SERVER=localhost", "DB_PORT=1433",
           "DB_DATABASE=CDM54_2601", "DB_USER=fixture", "DB_PASSWORD=fixture",
           "CDM_DATABASE_SCHEMA=CDM54_2601.CDM")

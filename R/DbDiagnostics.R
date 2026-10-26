@@ -1,6 +1,6 @@
 # Diagnostics remain local to the role. They never enter the federated exchange.
 # Callers outside the Windows launcher keep SQL logging and short-query guards off.
-.fpsDbRuntimeRevision <- "jdbc-probe-3"
+.fpsDbRuntimeRevision <- "jdbc-probe-4"
 
 .fpsDiagnosticWrite <- function(name, text, append = FALSE) {
     directory <- getOption("FederatedPs.sqlDiagnosticsDirectory")
@@ -98,9 +98,9 @@
             phase, status, fetched, exhausted,
             if (is.null(firstFailure)) "" else firstFailure, sep = "\t"), append = TRUE)
     }
-    call <- function(object, type, method, ..., resource = "Connection") {
+    call <- function(object, type, method, ..., resource = "Connection", cell = "") {
         phase <- paste0(label, ": JDBC ", resource, ".", method,
-            if (identical(method, "close")) " (resource cleanup)" else "")
+            if (identical(method, "close")) " (resource cleanup)" else "", cell)
         .fpsDbStartupState(phase)
         journal(phase, "started")
         value <- tryCatch(.fpsDbOperation(phase, jcall(object, type, method, ...), completed = 0),
@@ -150,9 +150,10 @@
         fetched <- fetched + 1L
         if (fetched > 2L) stop("Small JDBC probe returned more than two rows; expected server-bounded SQL")
         for (i in seq_along(columns)) {
+            cell <- sprintf(" [row=%d column=%d %s]", fetched, i, names(columns)[i])
             value <- if (columns[[i]] == "integer")
-                call(result, "I", "getInt", as.integer(i), resource = "ResultSet") else
-                call(result, "S", "getString", as.integer(i), resource = "ResultSet")
+                call(result, "I", "getInt", as.integer(i), resource = "ResultSet", cell = cell) else
+                call(result, "S", "getString", as.integer(i), resource = "ResultSet", cell = cell)
             if (isTRUE(call(result, "Z", "wasNull", resource = "ResultSet")))
                 value <- if (columns[[i]] == "integer") NA_integer_ else NA_character_
             values[[i]] <- c(values[[i]], value)

@@ -10,5 +10,9 @@
   "sqlServerArchive": "sqlServerV9.2.0.zip",
   "sqlServerSha256": "eeee13088b81f7d9e114ee361e19cb9e9c3934d9ae41854e43d961942f46b4a0",
   "sqlServerJar": "mssql-jdbc-9.2.0.jre8.jar",
-  "sqlServerJarSha256": "048f6ad639ed4e725033ec0809d332662de8dfa63ba662dabb583abb4db2e6a3"
+  "sqlServerJarSha256": "048f6ad639ed4e725033ec0809d332662de8dfa63ba662dabb583abb4db2e6a3",
+  "sqlServerActiveJar": "mssql-jdbc-7.4.1.jre8.jar",
+  "sqlServerActiveDirectory": "dbeaver-7.4.1",
+  "sqlServerActiveUrl": "https://repo.maven.apache.org/maven2/com/microsoft/sqlserver/mssql-jdbc/7.4.1.jre8/mssql-jdbc-7.4.1.jre8.jar",
+  "sqlServerActiveSha256": "00a6eaf49184dbffd89c4baf21d08a471797ead9bf48ca38faf7f9fe4244e391"
 }

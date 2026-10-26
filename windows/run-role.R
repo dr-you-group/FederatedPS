@@ -10,7 +10,7 @@ progress <- function(stage, detail = "") utils::getFromNamespace(".fpsProgress",
 source(file.path(config$project, "windows", "common.R"))
 source(file.path(config$project, "windows", "db-runtime.R"))
 progress("startup", "Checking offline runtime")
-fp_verify_runtime(config$project)
+fp_verify_runtime(config$project, config$configDirectory)
 fp_check_names(config$runId, config$sites)
 stopifnot(role %in% c("aggregator", config$sites))
 Sys.setenv(PDA_DIR = config$exchange, FEDERATEDPS_SITE = role,

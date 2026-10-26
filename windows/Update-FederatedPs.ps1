@@ -11,6 +11,8 @@ if ($busy.Count) {
 }
 $runtime=Set-FederatedEnvironment -InstallRoot $InstallRoot -RHome $RHome -JavaHome $JavaHome
 $project=Get-FederatedProject
+. (Join-Path $PSScriptRoot 'Install-Jdbc.ps1')
+Install-FederatedJdbc -InstallRoot $InstallRoot
 Invoke-FederatedR $runtime.Rscript @((Join-Path $PSScriptRoot 'update-package.R'),$project,$runtime.Library)
 Invoke-FederatedR $runtime.Rscript @((Join-Path $PSScriptRoot 'verify.R'),$project)
-Write-Host 'PASS: FederatedPs updated. Cyclops, JDBC and other dependencies were not rebuilt.'
+Write-Host 'PASS: FederatedPs updated. JDBC follows yuhs.Renviron (bundled default: 7.4.1); Cyclops and R dependencies were not rebuilt.'

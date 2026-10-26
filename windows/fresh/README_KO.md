@@ -151,7 +151,7 @@ SitePartition/CohortMethod 중간 단계만 끝난 상태는 재개 체크포인
 ```
 
 R, Rtools, Java, Cyclops를 다시 설치할 필요가 없습니다. 실행 전 확인에
-`[jdbc-probe-3; sql-plan-4]`가 표시되어야 합니다. 같은 0.0.10이라도 설치된 패키지가 구버전이면
+`[jdbc-probe-4; sql-plan-4]`가 표시되어야 합니다. 같은 0.0.10이라도 설치된 패키지가 구버전이면
 분석을 시작하지 않고 업데이트 명령을 안내합니다.
 
 0단계는 `db-startup-watchdog.log`에 기관별 현재 호출과 경과/제한 시간을 기록합니다.
@@ -285,3 +285,37 @@ Set-Location 'C:\FP'
 R/RStudio는 재설치 전에 닫아 둡니다. 재설치 자체가 실패하면 성공으로 표시하거나
 분석을 시작하지 않고 해당 설치 오류를 출력합니다. 별도 설치 경로를 사용했다면
 APPLY_FIX에 `-InstallRoot '<설치 경로>'`도 전달합니다.
+
+
+## JDBC 경로를 Renviron에서 선택 (jdbc-probe-4)
+
+실제 설정 파일은 `FederatedPS/windows/config/yuhs.Renviron`입니다.
+DBeaver에서 사용하는 JAR이 있는 폴더를 다음처럼 지정할 수 있습니다.
+
+```text
+DATABASECONNECTOR_JAR_FOLDER=C:/FederatedPS/jdbc/sqlserver/dbeaver-7.4.1
+```
+
+폴더에 SQL Server JAR이 여러 개 있거나 정확한 파일을 선택하려면 위 설정 대신:
+
+```text
+DB_JDBC_JAR=C:/FederatedPS/jdbc/sqlserver/dbeaver-7.4.1/mssql-jdbc-7.4.1.jre8.jar
+```
+
+둘 중 하나만 지정하면 됩니다. DBeaver의 다른 실제 경로로 바꾸어도 됩니다.
+공백이 있으면 큰따옴표로 감싸고 `/` 경로 구분자를 사용하십시오.
+PowerShell의 기본 JDBC 폴더보다 Renviron 설정이 우선합니다.
+지정된 폴더에 JAR이 있으면 `sqlserver`를 다시 붙이지 않습니다.
+JAR을 지정하지 않았을 때는 이 패치에 포함한 7.4.1을 사용합니다.
+
+R/RStudio를 완전히 종료하고 `RUN.ps1`을 다시 실행하십시오.
+`JDBC ACTIVE:`에 실제 로드된 파일 경로와 driver 7.4가 표시됩니다.
+CARE_SITE 행/열 번호는 기록하지만 반환된 문자열과 DB 비밀번호는 출력하지 않습니다.
+기존 APPLY_FIX의 백업 후 덮어쓰기/자동 패키지 재설치 동작은 유지됩니다.
+
+확인된 문제는 이전 코드가 고정 설치 폴더의 9.2 JAR 존재 여부를 검사하고,
+Renviron의 경로에 무조건 `sqlserver`를 붙였다는 점입니다.
+`ResultSet.getString` 정지 메시지만으로 9.2 드라이버 자체의 결함은 확정할 수 없습니다.
+현재 수정은 동작하는 DBeaver와 같은 JAR을 실제로 선택하도록 하는 호환성 수정입니다.
+실제 HIWARE/DB 연결 결과는 현장에서 확인해야 합니다. 재발 시 `07_CHECK_DB.ps1` 및
+기존 진단 수집 도구의 로그와 `shutdown-thread-*.txt`가 정지 지점을 구분하는 근거입니다.

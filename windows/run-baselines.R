@@ -71,7 +71,7 @@ extract_site <- function(site) {
 
 main <- function() {
     progress("startup", if (is.null(prepareSite)) "Starting selected models" else "Starting isolated site extraction worker")
-    fp_verify_runtime(config$project)
+    fp_verify_runtime(config$project, config$configDirectory)
     fp_check_names(config$runId, config$sites)
     fp_check_yuhs_sites(config)
     stopifnot(identical(config$mode, "SelectedMethods"), identical(config$dataset, "YUHS"),

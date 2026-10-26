@@ -47,3 +47,13 @@ try {
 Write-Host "Ready: $driverArchive" -ForegroundColor Green
 Write-Host 'Transfer this clean repository checkout including windows\payload to the offline host.'
 Write-Host 'On that host, close all R/RStudio sessions and run windows\Install-Offline.ps1.'
+
+# The compatible driver is isolated from the legacy 9.2 diagnostic reference.
+$active = Join-Path $payload $lock.sqlServerActiveJar
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+Invoke-WebRequest -Uri $lock.sqlServerActiveUrl -OutFile "$active.partial" -UseBasicParsing
+if ((Get-FileHash -LiteralPath "$active.partial" -Algorithm SHA256).Hash -ne $lock.sqlServerActiveSha256) {
+    throw 'Downloaded Microsoft JDBC 7.4.1 differs from the published package used for this release.'
+}
+Move-Item -LiteralPath "$active.partial" -Destination $active -Force
+Write-Host "Ready: $active" -ForegroundColor Green
