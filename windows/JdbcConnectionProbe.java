@@ -1,4 +1,5 @@
-// Run with the installed JDK 17 source-file launcher. No javac/build/install.
+// Distributed as Java 11 bytecode for an installed JRE 11+ (no local compiler).
+// The Java source-file launcher remains available when a full JDK is selected.
 // Reads the same selected JAR/configuration via stdin; no secrets in arguments,
 // output, result cells or files. Queries only SELECT 1 and bounded CARE_SITE rows.
 import java.io.BufferedReader;
@@ -32,6 +33,10 @@ public class JdbcConnectionProbe {
     private static final FileOutputStream heartbeatOutput = new FileOutputStream(FileDescriptor.err);
     private static final byte[] heartbeatBytes = "JAVA_HEARTBEAT\n".getBytes(StandardCharsets.US_ASCII);
     private static final byte[] timeoutBytes = "JAVA_WATCHDOG_TIMEOUT_RAW\n".getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] preExitBeginBytes = "JAVA_PRE_EXIT_THREAD_DUMP_BEGIN_RAW\n".getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] preExitEndBytes = "JAVA_PRE_EXIT_THREAD_DUMP_END_RAW\n".getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] shutdownBeginBytes = "JAVA_SHUTDOWN_HOOK_BEGIN_RAW\n".getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] shutdownEndBytes = "JAVA_SHUTDOWN_HOOK_END_RAW\n".getBytes(StandardCharsets.US_ASCII);
 
     private static void raw(byte[] bytes) {
         try { heartbeatOutput.write(bytes); heartbeatOutput.flush(); } catch (Throwable ignored) { }
@@ -73,17 +78,43 @@ public class JdbcConnectionProbe {
             SQLException sql = (SQLException) error;
             log("SQLSTATE=" + sql.getSQLState() + " vendorCode=" + sql.getErrorCode());
         }
-        for (StackTraceElement frame : error.getStackTrace()) System.out.println("    at " + frame);
+        for (StackTraceElement frame : error.getStackTrace()) printFrame(frame);
         System.out.flush();
+    }
+    private static void printFrame(StackTraceElement frame) {
+        // Class-loader/thread names can contain application-supplied values.
+        // Keep code locations only, with known connection secrets redacted.
+        System.out.println("    at " + redact(frame.getClassName()) + "." + redact(frame.getMethodName())
+            + "(line=" + frame.getLineNumber() + ", native=" + frame.isNativeMethod() + ")");
     }
     private static void dumpThreads() {
         log("JAVA_THREAD_DUMP_BEGIN");
         for (Map.Entry<Thread, StackTraceElement[]> entry : Thread.getAllStackTraces().entrySet()) {
             Thread thread = entry.getKey();
-            log("THREAD id=" + thread.getId() + " name=" + thread.getName() + " state=" + thread.getState());
-            for (StackTraceElement frame : entry.getValue()) System.out.println("    at " + frame);
+            // Never emit thread names: a driver/agent may put credentials or
+            // row/application data there, beyond the known user/password.
+            log("THREAD id=" + thread.getId() + " name=[REDACTED] state=" + thread.getState()
+                + " daemon=" + thread.isDaemon() + " alive=" + thread.isAlive());
+            for (StackTraceElement frame : entry.getValue()) printFrame(frame);
         }
         log("JAVA_THREAD_DUMP_END");
+    }
+    private static void registerShutdownMarkers() {
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            // Raw markers use the independent stderr path already used by the
+            // watchdog, so stdout locking cannot hide hook entry altogether.
+            raw(shutdownBeginBytes);
+            log("JAVA_SHUTDOWN_HOOK_BEGIN");
+            log("JAVA_SHUTDOWN_HOOK_END");
+            raw(shutdownEndBytes);
+        }, "fps-java-probe-shutdown-marker"));
+    }
+    private static void preExitThreadSnapshot() {
+        raw(preExitBeginBytes);
+        log("JAVA_PRE_EXIT_THREAD_DUMP_BEGIN");
+        dumpThreads();
+        log("JAVA_PRE_EXIT_THREAD_DUMP_END");
+        raw(preExitEndBytes);
     }
     private static void watchdog(int totalSeconds, int phaseSeconds) {
         long begun = System.nanoTime();
@@ -234,6 +265,7 @@ public class JdbcConnectionProbe {
                 !(args[4].equals("care-site-id") || args[4].equals("care-site-text") || args[4].equals("synthetic-text")))
                 throw new IllegalArgumentException("Invalid probe limits/mode");
             watchdog(totalTimeout, queryTimeout + 15);
+            registerShutdownMarkers();
             start("Read private configuration"); readConfig(); end();
             Class<?> driverClass = Class.forName("com.microsoft.sqlserver.jdbc.SQLServerDriver");
             Path actualJar = Path.of(driverClass.getProtectionDomain().getCodeSource().getLocation().toURI()).toRealPath();
@@ -264,6 +296,7 @@ public class JdbcConnectionProbe {
             }
             start("Connection.close"); connection.close(); connection = null; end();
             log("CHECKS_COMPLETE: independent Java checks and explicit close finished; waiting for process exit");
+            start("Pre-exit thread snapshot"); preExitThreadSnapshot(); end();
             code = 0;
         } catch (Throwable error) {
             failure(error);

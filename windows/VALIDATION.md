@@ -1,3 +1,36 @@
+## Same-runtime independent JDBC comparison for DBeaver Java 11 (2026-10-26)
+
+The user's R control actually loaded DBeaver Java 11.0.12 and the same JDBC
+7.4.1 JAR. SELECT 1 and sites 1/2 completed; site 3 stopped at the executeQuery
+boundary and the external 240-second deadline killed the worker. Java 11 alone
+did not resolve the failure. No production Java default, clinical SQL, driver,
+TLS setting or retry/timeout policy is changed by this diagnostic revision.
+
+The release includes JdbcConnectionProbe.class built with --release 11 (major
+55). The launcher prefers this class when present, using the exact selected
+JDBC JAR and explicit JavaHome. This permits a DBeaver JRE without jdk.compiler
+to run the same independent probe. Repository source launch remains a fallback.
+build-jdbc-probe.py produces source/class hashes for release reproducibility;
+it does not impose an existing-file integrity gate on the user's bundle.
+
+After verified queries and explicit close, the helper captures a pre-exit
+thread snapshot and records shutdown-hook boundaries. Thread names and data
+values are omitted. Completion, post-check diagnostics and termination request
+are separate facts; a post-check snapshot stall must not be called JVM shutdown.
+
+Validation uses the available Linux Java 17 and PowerShell 7 runtime. The
+compiled helper is tested with jdk.compiler excluded, a deliberately invalid
+source alongside it, and Java 11 class-file headers. This is not actual Java 11
+or Windows/HIWARE execution; the target-host comparison remains necessary.
+
+The actual launcher/loopback tests pass for source-mode normal/synthetic/error
+and compiled-mode normal/error, including a secret-bearing thread name omitted
+from snapshots. Injected shutdown-hook stalls remain shutdown-timeout failures
+after forced cleanup. An injected pre-exit snapshot stall reports
+post-check-timeout with checksComplete=true and terminationRequested=false;
+the Java watchdog exits 124. Test subprocesses opt out of PowerShell/.NET
+telemetry; the delivered launcher preserves the user's runtime environment.
+
 ## Separate completed JDBC checks from JVM shutdown (2026-10-26)
 
 The 19:42 KST independent-Java receipt contained all three ID checks and an

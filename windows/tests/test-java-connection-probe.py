@@ -149,6 +149,13 @@ def run(case, buffering="full", mode="care-site-id", text_type="nvarchar"):
     if case == "normal":
         assert result.returncode == 0 and "CHECKS_COMPLETE:" in text, text
         assert "START JVM termination System.exit(0)" in text, text
+        sequence = ["DONE Connection.close", "CHECKS_COMPLETE:", "JAVA_PRE_EXIT_THREAD_DUMP_BEGIN",
+                    "JAVA_PRE_EXIT_THREAD_DUMP_END", "START JVM termination System.exit(0)",
+                    "JAVA_SHUTDOWN_HOOK_BEGIN", "JAVA_SHUTDOWN_HOOK_END"]
+        positions = [result.stdout.index(marker) for marker in sequence]
+        assert positions == sorted(positions), result.stdout
+        assert "JAVA_SHUTDOWN_HOOK_BEGIN_RAW" in result.stderr and "JAVA_SHUTDOWN_HOOK_END_RAW" in result.stderr, result.stderr
+        assert "name=[REDACTED]" in result.stdout, result.stdout
         expected = [] if mode == "synthetic-text" else [1, 2, 3]
         assert [int(re.search(r"care_site_id = ([0-9]+)$", q)[1]) for q in queries if q.startswith("SELECT TOP (2)")] == expected, queries
         count = 4 if mode == "synthetic-text" else 8
@@ -176,6 +183,10 @@ def run(case, buffering="full", mode="care-site-id", text_type="nvarchar"):
         # actual JDBC checks and connection.close have finished.
         assert result.returncode != 0 and "CHECKS_COMPLETE:" in text, text
         assert "START JVM termination System.exit(0)" in text, text
+    elif case == "post-check":
+        assert result.returncode == 124 and "CHECKS_COMPLETE:" in text, text
+        assert "JAVA_PRE_EXIT_THREAD_DUMP_BEGIN" in text and "JAVA_PRE_EXIT_THREAD_DUMP_END" not in text, text
+        assert "START JVM termination System.exit(" not in text, text
     else:
         assert result.returncode == 124 and elapsed < 12 and "CHECKS_COMPLETE:" not in text, text
         assert "JAVA_WATCHDOG_TIMEOUT" in text and "JAVA_THREAD_DUMP_BEGIN" in text and "JAVA_THREAD_DUMP_END" in text, text

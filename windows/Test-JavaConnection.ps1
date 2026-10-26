@@ -36,13 +36,18 @@ $name='java-connection-'+[DateTime]::Now.ToString('yyyyMMdd-HHmmss')+'-'+[guid]:
 $out=Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) $name
 New-Item -ItemType Directory -Path $out -Force | Out-Null
 $source=Join-Path $PSScriptRoot 'JdbcConnectionProbe.java'
+$classDirectory=Join-Path $PSScriptRoot 'java11'
+$compiledClass=Join-Path $classDirectory 'JdbcConnectionProbe.class'
+$launchMode=if(Test-Path -LiteralPath $compiledClass -PathType Leaf){'compiled-java11'}else{'source'}
 $exportScript=Join-Path $PSScriptRoot 'java-probe-config.R'
 $java=Join-Path $env:JAVA_HOME 'bin\java.exe'
-foreach($required in @($source,$exportScript,$java)) {
+$program=if($launchMode -eq 'compiled-java11'){$compiledClass}else{$source}
+foreach($required in @($program,$exportScript,$java)) {
     if (-not(Test-Path -LiteralPath $required -PathType Leaf)) { throw "Missing diagnostic dependency: $required" }
 }
 $state='failed';$exitCode=$null;$failure=$null;$jar=$null
 $checksComplete=$false;$processExited=$false;$forcedTermination=$false;$outputDrained=$false
+$terminationRequested=$false;$snapshotStarted=$false;$snapshotFinished=$false
 $completionMarker='CHECKS_COMPLETE: independent Java checks and explicit close finished; waiting for process exit'
 $export=$null;$process=$null;$stdoutFile=$null;$stderrFile=$null
 $stdoutTask=$null;$stderrTask=$null;$privatePacket=$null;$privateLines=$null
@@ -81,12 +86,19 @@ try {
     for($i=0;$i -lt $pathBytes.Length;$i++) { $pathBytes[$i]=[Convert]::ToByte($privateLines[1].Substring(2*$i,2),16) }
     $jar=[Text.Encoding]::UTF8.GetString($pathBytes)
     if (-not(Test-Path -LiteralPath $jar -PathType Leaf)) { throw 'The selected JDBC JAR does not exist.' }
-    Write-Host "Independent Java probe: $(Split-Path $jar -Leaf); mode=$ProbeMode; site_ids=$($SiteIds -join ','); buffering=$ResponseBuffering."
+    Write-Host "Independent Java probe: $(Split-Path $jar -Leaf); launch=$launchMode; mode=$ProbeMode; site_ids=$($SiteIds -join ','); buffering=$ResponseBuffering."
     Write-Host "Logs: $out"
     $process=New-Object Diagnostics.Process
     $process.StartInfo=New-Object Diagnostics.ProcessStartInfo
     $process.StartInfo.FileName=$java
-    $arguments=@('--class-path',$jar,$source,[string]$SmallQueryTimeoutSeconds,[string]$TimeoutSeconds,
+    if($launchMode -eq 'compiled-java11'){
+        # Precompiled Java 11 bytecode runs in a JRE without jdk.compiler.
+        # The selected database JAR stays unchanged and is still verified by
+        # the probe against the actual loaded driver class source.
+        $classPath=@($jar,$classDirectory) -join [IO.Path]::PathSeparator
+        $arguments=@('--class-path',$classPath,'JdbcConnectionProbe')
+    }else{$arguments=@('--class-path',$jar,$source)}
+    $arguments+=@([string]$SmallQueryTimeoutSeconds,[string]$TimeoutSeconds,
         $ResponseBuffering,($SiteIds -join ','),$ProbeMode)
     $process.StartInfo.Arguments=(($arguments | ForEach-Object {ConvertTo-NativeArgument $_}) -join ' ')
     $process.StartInfo.WorkingDirectory=$Project
@@ -109,7 +121,7 @@ try {
     $process.StandardInput.Close()
     $privatePacket=$null;$privateLines=$null;$privateOutput=$null;$privateError=$null
     $javaStarted=[DateTime]::UtcNow;$lastStatus=$javaStarted.AddSeconds(-10)
-    $outerLimit=$TimeoutSeconds+15 # covers source-launch compilation/shutdown
+    $outerLimit=$TimeoutSeconds+15 # covers process launch/optional source compilation/shutdown
     while (-not $process.WaitForExit(200)) {
         $now=[DateTime]::UtcNow
         if (($now-$lastStatus).TotalSeconds -ge 10) {
@@ -136,7 +148,7 @@ try {
     if (-not $stdoutTask.Wait(2000) -or -not $stderrTask.Wait(2000)) { throw 'Java output streams did not finish.' }
     $stdoutFile.Flush();$stderrFile.Flush()
     if ($exitCode -eq 124) { $state='timeout';throw 'Java watchdog detected a stalled call; see its phase and thread dump.' }
-    $checksComplete=Select-String -LiteralPath (Join-Path $out 'java.stdout.log') -Pattern ([regex]::Escape($completionMarker)+'$') -Quiet
+    $checksComplete=Select-String -LiteralPath (Join-Path $out 'java.stdout.log') -Pattern ('^\S+ '+[regex]::Escape($completionMarker)+'$') -Quiet
     if ($exitCode -ne 0 -or -not $checksComplete) { throw "Independent Java probe failed (exit $exitCode). See java.stdout.log and java.stderr.log." }
     $state='passed'
 } catch {
@@ -175,18 +187,29 @@ try {
 # Only inspect aggregate completion after the private process's output has
 # drained. A partial log line or a pending CopyToAsync must not certify checks.
 if($outputDrained){
-    $checksComplete=Select-String -LiteralPath (Join-Path $out 'java.stdout.log') -Pattern ([regex]::Escape($completionMarker)+'$') -Quiet
+    $checksComplete=Select-String -LiteralPath (Join-Path $out 'java.stdout.log') -Pattern ('^\S+ '+[regex]::Escape($completionMarker)+'$') -Quiet
+    $terminationRequested=Select-String -LiteralPath (Join-Path $out 'java.stdout.log') -Pattern '^\S+ START JVM termination System\.exit\(-?[0-9]+\)$' -Quiet
+    $snapshotStarted=(Select-String -LiteralPath (Join-Path $out 'java.stdout.log') -Pattern '^\S+ JAVA_PRE_EXIT_THREAD_DUMP_BEGIN$' -Quiet) -or
+        (Select-String -LiteralPath (Join-Path $out 'java.stderr.log') -Pattern '^JAVA_PRE_EXIT_THREAD_DUMP_BEGIN_RAW$' -Quiet)
+    $snapshotFinished=(Select-String -LiteralPath (Join-Path $out 'java.stdout.log') -Pattern '^\S+ JAVA_PRE_EXIT_THREAD_DUMP_END$' -Quiet) -or
+        (Select-String -LiteralPath (Join-Path $out 'java.stderr.log') -Pattern '^JAVA_PRE_EXIT_THREAD_DUMP_END_RAW$' -Quiet)
 }
 if($state -eq 'timeout' -and $checksComplete){
-    $state='shutdown-timeout'
-    $failure='Database checks and explicit disconnect completed, but the Java process did not exit within the configured deadline. This is a process shutdown failure, not a query timeout.'
+    if($terminationRequested){
+        $state='shutdown-timeout'
+        $failure='Database checks and explicit disconnect completed, but the Java process did not exit within the configured deadline. This is a process shutdown failure, not a query timeout.'
+    }else{
+        $state='post-check-timeout'
+        $failure='Database checks and explicit disconnect completed, but the probe stalled before a JVM termination request was recorded. Inspect the pre-exit snapshot markers; this is not a query timeout and does not prove shutdown had started.'
+    }
 }
 if($state -eq 'passed' -and (-not $checksComplete -or -not $processExited -or $forcedTermination -or $exitCode -ne 0 -or -not $outputDrained)){
     $state='failed';$failure='Could not verify completed checks, normal process exit and drained output.'
 }
 if($failure){Write-Warning $failure}
 $receipt=[ordered]@{state=$state;independentJvm=$true;driverFile=if($jar){Split-Path $jar -Leaf}else{$null};
-    javaExecutable=[IO.Path]::GetFullPath($java);checksComplete=[bool]$checksComplete;processExited=$processExited;
+    javaExecutable=[IO.Path]::GetFullPath($java);launchMode=$launchMode;checksComplete=[bool]$checksComplete;processExited=$processExited;
+    terminationRequested=[bool]$terminationRequested;snapshotStarted=[bool]$snapshotStarted;snapshotFinished=[bool]$snapshotFinished;
     normalExitObserved=[bool]($processExited -and -not $forcedTermination -and $exitCode -eq 0);
     forcedTermination=$forcedTermination;outputDrained=$outputDrained;
     sites=@($SiteIds);probeMode=$ProbeMode;responseBuffering=$ResponseBuffering;smallQueryTimeout=$SmallQueryTimeoutSeconds;
