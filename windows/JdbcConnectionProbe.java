@@ -273,8 +273,11 @@ public class JdbcConnectionProbe {
                 catch (Throwable error) { log("CLEANUP_FAILURE " + error.getClass().getName() + " " + redact(error.getMessage())); }
             }
         }
-        // Keep the watchdog active through JVM shutdown. The external launcher
-        // confirms exit; a CHECKS_COMPLETE line by itself is never a pass.
+        // The external launcher confirms exit: JVM shutdown may stop daemon
+        // threads before the native process exits, so a heartbeat/watchdog is
+        // not guaranteed to survive System.exit. Completed checks are separate
+        // from successful process shutdown.
+        start("JVM termination System.exit(" + code + ")");
         System.exit(code);
     }
 }

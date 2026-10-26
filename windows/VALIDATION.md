@@ -1,3 +1,35 @@
+## Separate completed JDBC checks from JVM shutdown (2026-10-26)
+
+The 19:42 KST independent-Java receipt contained all three ID checks and an
+explicit Connection.close completion, followed by no native process exit for
+195 seconds. This is evidence of successful bounded queries and a subsequent
+shutdown failure in that execution; it does not resolve the earlier R/rJava
+mid-call stalls. No clinical SQL, package runtime, driver, TLS policy or retry
+policy changes are made in this diagnostic revision.
+
+The JDBC launcher records checksComplete, processExited, normalExitObserved,
+forcedTermination, outputDrained and the actual javaExecutable independently.
+Completed checks followed by a deadline become shutdown-timeout, never PASS.
+The Java source logs an explicit System.exit boundary. The no-DB lifecycle tool
+compares normal main return and System.exit with the same default Temurin 17
+selection, while preserving existing JVM/security settings.
+
+Validation on Linux with Java 17 and PowerShell 7.4 (not the live Windows host):
+
+- Actual Microsoft 7.4.1 loopback TDS: ID-only full/adaptive, Korean NVARCHAR
+  and CP949 VARCHAR, synthetic text, terminal SQL error and missing response.
+- Real PowerShell/base-R/private-input/Java pipeline: normal and synthetic
+  success, SQL failure, and an injected shutdown hook stall. The last case
+  completes JDBC checks, is killed at the external deadline, and reports
+  shutdown-timeout/checksComplete=true/normalExitObserved=false. No secret or
+  private configuration packet is present in the result logs.
+- Real no-DB lifecycle launcher: normal return and System.exit(0) pass; a
+  nonzero native exit after completed body/hooks fails; an injected non-daemon
+  shutdown stall times out, and a hanging owned jcmd is bounded and cleaned up.
+  Multiline inherited JVM-option echo values are absent from the packaged logs.
+- PowerShell parsing and git diff whitespace checks pass. Native Windows 5.1,
+  HIWARE and the user's JDK shutdown behavior require the target-host results.
+
 ## Study-first extraction revision 4 (2026-10-26)
 
 Remove the per-site whole-CDM VISIT_OCCURRENCE membership aggregation. Resolve

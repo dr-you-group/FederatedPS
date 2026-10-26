@@ -148,6 +148,7 @@ def run(case, buffering="full", mode="care-site-id", text_type="nvarchar"):
     assert "PROBE_MODE=" + mode in text and "JAVA_HEARTBEAT" in result.stderr, text
     if case == "normal":
         assert result.returncode == 0 and "CHECKS_COMPLETE:" in text, text
+        assert "START JVM termination System.exit(0)" in text, text
         expected = [] if mode == "synthetic-text" else [1, 2, 3]
         assert [int(re.search(r"care_site_id = ([0-9]+)$", q)[1]) for q in queries if q.startswith("SELECT TOP (2)")] == expected, queries
         count = 4 if mode == "synthetic-text" else 8
@@ -166,9 +167,15 @@ def run(case, buffering="full", mode="care-site-id", text_type="nvarchar"):
             assert "DONE CARE_SITE site_id=1 ResultSet.wasNull row=1 column=2" in text, text
     elif case == "late-error":
         assert result.returncode == 2 and "CHECKS_COMPLETE:" not in text, text
+        assert "START JVM termination System.exit(2)" in text, text
         assert text.count("FIRST_FAILURE") == 1, text
         assert "Statement.getMoreResults" in text and "Fixture SQL error for [REDACTED] and [REDACTED]" in text, text
         assert "SQLSTATE=" in text, text
+    elif case == "shutdown":
+        # Launcher fixture injects a hanging JVM shutdown hook only after all
+        # actual JDBC checks and connection.close have finished.
+        assert result.returncode != 0 and "CHECKS_COMPLETE:" in text, text
+        assert "START JVM termination System.exit(0)" in text, text
     else:
         assert result.returncode == 124 and elapsed < 12 and "CHECKS_COMPLETE:" not in text, text
         assert "JAVA_WATCHDOG_TIMEOUT" in text and "JAVA_THREAD_DUMP_BEGIN" in text and "JAVA_THREAD_DUMP_END" in text, text

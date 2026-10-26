@@ -42,6 +42,8 @@ foreach($required in @($source,$exportScript,$java)) {
     if (-not(Test-Path -LiteralPath $required -PathType Leaf)) { throw "Missing diagnostic dependency: $required" }
 }
 $state='failed';$exitCode=$null;$failure=$null;$jar=$null
+$checksComplete=$false;$processExited=$false;$forcedTermination=$false;$outputDrained=$false
+$completionMarker='CHECKS_COMPLETE: independent Java checks and explicit close finished; waiting for process exit'
 $export=$null;$process=$null;$stdoutFile=$null;$stderrFile=$null
 $stdoutTask=$null;$stderrTask=$null;$privatePacket=$null;$privateLines=$null
 $processSamples=New-Object 'System.Collections.Generic.List[object]'
@@ -123,7 +125,9 @@ try {
             $lastStatus=$now
         }
         if (($now-$javaStarted).TotalSeconds -ge $outerLimit) {
-            $state='timeout'
+            $process.Refresh()
+            if ($process.HasExited) { break }
+            $state='timeout';$forcedTermination=$true
             Stop-FederatedProcessTree $process
             throw "Independent Java process exceeded ${outerLimit}s; only this probe process was stopped."
         }
@@ -132,24 +136,59 @@ try {
     if (-not $stdoutTask.Wait(2000) -or -not $stderrTask.Wait(2000)) { throw 'Java output streams did not finish.' }
     $stdoutFile.Flush();$stderrFile.Flush()
     if ($exitCode -eq 124) { $state='timeout';throw 'Java watchdog detected a stalled call; see its phase and thread dump.' }
-    $finished=Select-String -LiteralPath (Join-Path $out 'java.stdout.log') -SimpleMatch 'CHECKS_COMPLETE:' -Quiet
-    if ($exitCode -ne 0 -or -not $finished) { throw "Independent Java probe failed (exit $exitCode). See java.stdout.log and java.stderr.log." }
+    $checksComplete=Select-String -LiteralPath (Join-Path $out 'java.stdout.log') -Pattern ([regex]::Escape($completionMarker)+'$') -Quiet
+    if ($exitCode -ne 0 -or -not $checksComplete) { throw "Independent Java probe failed (exit $exitCode). See java.stdout.log and java.stderr.log." }
     $state='passed'
 } catch {
     $failure=$_.Exception.Message
-    Write-Warning $failure
 } finally {
     $privatePacket=$null;$privateLines=$null;$privateOutput=$null;$privateError=$null
     foreach($owned in @($process,$export)) {
         if ($null -ne $owned) {
-            try { $owned.Refresh();if(-not $owned.HasExited){Stop-FederatedProcessTree $owned} } catch { }
+            try {
+                $owned.Refresh()
+                if(-not $owned.HasExited){
+                    if ([object]::ReferenceEquals($owned,$process)) { $forcedTermination=$true }
+                    Stop-FederatedProcessTree $owned
+                }
+            } catch { }
         }
     }
-    foreach($task in @($stdoutTask,$stderrTask)) { if($null -ne $task){try{[void]$task.Wait(2000)}catch{}} }
+    $outputDrained=($null -ne $stdoutTask -and $null -ne $stderrTask)
+    foreach($task in @($stdoutTask,$stderrTask)) {
+        if($null -ne $task){
+            try {
+                if(-not $task.Wait(2000)){$outputDrained=$false}
+                elseif($task.IsFaulted -or $task.IsCanceled){$outputDrained=$false}
+            }catch{$outputDrained=$false}
+        }
+    }
     foreach($stream in @($stdoutFile,$stderrFile)) { if($null -ne $stream){$stream.Dispose()} }
+    if($null -ne $process){
+        try {
+            $process.Refresh();$processExited=$process.HasExited
+            if($processExited){$exitCode=$process.ExitCode}
+        }catch{ }
+    }
     foreach($owned in @($process,$export)) { if($null -ne $owned){$owned.Dispose()} }
 }
+# Only inspect aggregate completion after the private process's output has
+# drained. A partial log line or a pending CopyToAsync must not certify checks.
+if($outputDrained){
+    $checksComplete=Select-String -LiteralPath (Join-Path $out 'java.stdout.log') -Pattern ([regex]::Escape($completionMarker)+'$') -Quiet
+}
+if($state -eq 'timeout' -and $checksComplete){
+    $state='shutdown-timeout'
+    $failure='Database checks and explicit disconnect completed, but the Java process did not exit within the configured deadline. This is a process shutdown failure, not a query timeout.'
+}
+if($state -eq 'passed' -and (-not $checksComplete -or -not $processExited -or $forcedTermination -or $exitCode -ne 0 -or -not $outputDrained)){
+    $state='failed';$failure='Could not verify completed checks, normal process exit and drained output.'
+}
+if($failure){Write-Warning $failure}
 $receipt=[ordered]@{state=$state;independentJvm=$true;driverFile=if($jar){Split-Path $jar -Leaf}else{$null};
+    javaExecutable=[IO.Path]::GetFullPath($java);checksComplete=[bool]$checksComplete;processExited=$processExited;
+    normalExitObserved=[bool]($processExited -and -not $forcedTermination -and $exitCode -eq 0);
+    forcedTermination=$forcedTermination;outputDrained=$outputDrained;
     sites=@($SiteIds);probeMode=$ProbeMode;responseBuffering=$ResponseBuffering;smallQueryTimeout=$SmallQueryTimeoutSeconds;
     totalTimeout=$TimeoutSeconds;exitCode=$exitCode;elapsedSeconds=[Math]::Round(([DateTime]::UtcNow-$started).TotalSeconds,3);
     failure=$failure;processSamples=@($processSamples.ToArray());

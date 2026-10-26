@@ -17,6 +17,7 @@ spec = importlib.util.spec_from_file_location("wire", ROOT / "windows/tests/test
 wire = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(wire)
 real_run = subprocess.run
+shutdown_fixture = False
 
 
 def through_powershell(argv, input, **kwargs):
@@ -56,10 +57,26 @@ function Stop-FederatedProcessTree($Process) {
         # Also verify inherited package requests cannot cause this exporter to
         # initialize rJava. The actual launcher overrides R_DEFAULT_PACKAGES.
         environment["R_DEFAULT_PACKAGES"] = "rJava"
+        launcher = ROOT / "windows/Test-JavaConnection.ps1"
+        if shutdown_fixture:
+            # Modify only a temporary copy: keep the real Java checks/close,
+            # then block a JVM shutdown hook beyond the external deadline.
+            fixture_tools = root / "tools"
+            fixture_tools.mkdir()
+            for name in ("Test-JavaConnection.ps1", "java-probe-config.R"):
+                shutil.copy2(ROOT / "windows" / name, fixture_tools / name)
+            java_source = (ROOT / "windows/JdbcConnectionProbe.java").read_text()
+            java_source = java_source.replace("watchdog(totalTimeout, queryTimeout + 15);", "watchdog(3600, 3600);")
+            java_source = java_source.replace("System.exit(code);", '''Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                try { Thread.sleep(60000); } catch (InterruptedException ignored) { }
+            }, "fixture-shutdown-stall"));
+            System.exit(code);''')
+            (fixture_tools / "JdbcConnectionProbe.java").write_text(java_source)
+            launcher = fixture_tools / "Test-JavaConnection.ps1"
         result = real_run([os.environ["FPS_PWSH"], "-NoLogo", "-NoProfile", "-File",
-            str(ROOT / "windows/Test-JavaConnection.ps1"), "-Project", str(project),
+            str(launcher), "-Project", str(project),
             "-SmallQueryTimeoutSeconds", "1", "-TimeoutSeconds", "15", "-ProbeMode", argv[-1]],
-            text=True, capture_output=True, env=environment, timeout=25)
+            text=True, capture_output=True, env=environment, timeout=40 if shutdown_fixture else 25)
         archives = list((project / "work/diagnostics").glob("*.zip"))
         assert len(archives) == 1, result.stdout + result.stderr
         with zipfile.ZipFile(archives[0]) as archive:
@@ -74,7 +91,15 @@ function Stop-FederatedProcessTree($Process) {
         assert receipt["processSamples"] and all(
             (x["cpuSeconds"] is None or x["cpuSeconds"] >= 0) and
             (x["threads"] is None or x["threads"] > 0) for x in receipt["processSamples"]), receipt
-        assert receipt["state"] == ("passed" if receipt["exitCode"] == 0 else "failed"), receipt
+        expected = "shutdown-timeout" if shutdown_fixture else "passed" if receipt["exitCode"] == 0 else "failed"
+        assert receipt["state"] == expected, receipt
+        assert receipt["processExited"] and receipt["outputDrained"], receipt
+        assert Path(receipt["javaExecutable"]) == java_home / "bin/java.exe", receipt
+        assert receipt["normalExitObserved"] == (expected == "passed"), receipt
+        assert receipt["checksComplete"] == (expected in ("passed", "shutdown-timeout")), receipt
+        assert receipt["forcedTermination"] == shutdown_fixture, receipt
+        if shutdown_fixture:
+            assert "process shutdown failure, not a query timeout" in receipt["failure"], receipt
         assert (result.returncode == 0) == (receipt["state"] == "passed"), result.stdout + result.stderr
         all_output = result.stdout + result.stderr + "".join(texts.values())
         assert fields[4] not in all_output and fields[5] not in all_output, all_output
@@ -86,4 +111,6 @@ wire.subprocess = types.SimpleNamespace(run=through_powershell)
 wire.run("normal")
 wire.run("normal", mode="synthetic-text")
 wire.run("late-error")
+shutdown_fixture = True
+wire.run("shutdown")
 print("PASS: actual PowerShell/private base-R/standalone JDBC pipeline, mapping, success/failure receipt, ZIP and no credentials/private packet in outputs")
