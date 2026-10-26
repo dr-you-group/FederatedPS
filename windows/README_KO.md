@@ -264,7 +264,7 @@ notepad .\windows\config\yuhs.Renviron
 
 기관 ID가 변경되면 `yuhs-sites.json`을 수정합니다. 서로 다른 양의 정수 ID여야 하며,
 실제 `CARE_SITE`에 한 행씩 있어야 합니다. 일부 기관만 실행하려면
-`-Sites severance,gangnam`처럼 두 곳 이상을 지정합니다. `-Study`는
+`-Sites 1,2`처럼 두 곳 이상을 지정합니다. `-Study`는
 `FederatedPs::listStudies()`에 있는 연구 ID입니다. 각 기관에 치료군과 비교군이 모두
 있어야 하며, 비어 있으면 조건을 자동으로 완화하지 않고 중단합니다.
 
@@ -297,15 +297,16 @@ notepad .\windows\config\yuhs.Renviron
 
 소스 CDM에는 SELECT만 수행하고 작업 테이블은 연결별 SQL Server `#temp`에 만듭니다.
 source schema의 CREATE/UPDATE 권한은 필요 없지만 tempdb 공간이 필요합니다.
-사이트마다 방문 집계·임상 테이블을 읽으므로 대규모 CDM에서는 DB 부하와 tempdb 여유를
+사이트마다 연구 후보·기관 중복 검사·임상 테이블을 읽으므로 대규모 CDM에서는 DB 부하와 tempdb 여유를
 확인하십시오. 동시 실행 중 원본 CDM이 갱신되지 않는 고정 스냅샷을 사용합니다.
 
 실제 YUHS 데이터에는 이 개발 환경에서 접속하지 않았습니다. 최초 실행에서 각 역할의
 `careSite.csv`, `sitePartition.csv`, `recordLinkage.csv`, `attrition.csv`를 확인하십시오.
-연결 제외 수는 **단일기관 환자의 해당 테이블 전체 기록**을 분모로 하며, 연구 시간 창이나
-concept 필터 적용 전 수치입니다. 다기관 환자 수와 기관 미상 방문 수는 전체 CDM 값이라
-기관별 파일에 반복됩니다. 추출 중단 시에도 역할 로그에 단일기관 환자 수와 방문 연결 제외
-건수를 남깁니다. 환자별 결과는 각 사이트의 `result.rds`에만 저장하며, 실행 후 세 결과의
+최신 sql-plan-4의 연결 제외 수는 **준비된 연구 환자의 해당 테이블 기록**을 분모로 하며
+연구 시간 창 적용 전 수치입니다. default 상한 적용 시 선택된 환자 범위입니다.
+전체 CDM의 다기관 환자 수/기관 미상 방문 수는 미집계(NA)이며 준비 환자 집계와 구분합니다.
+자세한 변경은 [STUDY_FIRST_EXTRACTION_KO.md](STUDY_FIRST_EXTRACTION_KO.md)를 참조하십시오.
+환자별 결과는 각 사이트의 `result.rds`에만 저장하며, 실행 후 세 결과의
 PERSON_ID 중복도 확인합니다. 공유 exchange에는 환자 ID를 쓰지 않습니다.
 단일 Windows 계정의 프로세스 세 개는 기관 간 접근권한 격리를 제공하지 않습니다.
 

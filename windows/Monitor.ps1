@@ -122,9 +122,13 @@ function Get-FederatedProgressDisplay($Event, [bool]$AllowEta=$true,
         if($Event.PSObject.Properties['operation']){$op=$Event.operation}
         if($null -ne $op) {
             if($op.PSObject.Properties['statementCount']) {
-                $percent=[int][Math]::Floor(100.0*$op.statementsCompleted/$op.statementCount)
-                $description += " | SQL $($op.statementIndex)/$($op.statementCount), done $($op.statementsCompleted)/$($op.statementCount) = $percent% of statements"
-                $short += " | SQL $($op.statementIndex)/$($op.statementCount), done $($op.statementsCompleted)"
+                $statementPercent=[int][Math]::Floor(100.0*$op.statementsCompleted/$op.statementCount)
+                # A running SELECT has no row-completion percentage available.
+                # Keep completed-statement counts, but do not show a frozen 0%
+                # gauge as if it measured progress inside that query.
+                $percent=if($op.status -eq 'started'){-1}else{$statementPercent}
+                $description += " | SQL $($op.statementIndex)/$($op.statementCount), done $($op.statementsCompleted)/$($op.statementCount) = $statementPercent% of statements; current query row progress unknown"
+                $short += " | SQL $($op.statementIndex)/$($op.statementCount), done $($op.statementsCompleted)/$($op.statementCount); rows unknown"
                 $current=$op.statementLabel
             }
             $elapsed=if($op.status -eq 'started'){Get-FederatedElapsedSeconds $Now (ConvertTo-FederatedUtc $op.startedUtc)}else{$op.elapsedSeconds}

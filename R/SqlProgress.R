@@ -23,12 +23,13 @@
 .fpsRunSqlStatements <- function(statements, label, completed, execute, finish = function() NULL) {
     if (!length(statements)) return(invisible(numeric()))
     labels <- vapply(statements, .fpsSqlStatementLabel, "")
-    # Some SqlRender versions strip comments. Keep the known seven-statement
-    # partition labels explicit without changing SQL or using institution names.
-    if (identical(label, "SitePartition.sql") && length(statements) == 7L)
-        labels <- c("Aggregate all positive-site visits by patient (patient cap not applied)",
-            "Index patient-to-institution membership", "Select patients exclusive to this site",
-            "Index exclusive patients", "Copy all visits of exclusive patients at this site",
+    # Keep meaningful labels when SqlRender strips template comments.
+    if (identical(label, "SitePartition.sql") && length(statements) == 4L)
+        labels <- c("Find study-exposed patients at this site (drug and visit join)",
+            "Index study-exposed candidates", "Exclude visits to every other positive institution",
+            "Index exclusive study candidates")
+    if (identical(label, "SiteVisits.sql") && length(statements) == 3L)
+        labels <- c("Copy all visits of prepared patients (after early default cap)",
             "Index visits by visit_occurrence_id", "Index visits by person_id")
     batchId <- sprintf("%04d-%s", getOption("FederatedPs.dbOperationIndex", 0L) + 1L,
         gsub("[^A-Za-z0-9_-]+", "-", label))

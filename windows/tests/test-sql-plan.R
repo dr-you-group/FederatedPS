@@ -18,7 +18,11 @@ for (cap in c(0L,200L)) {
     site <- if(cap==0L) 1L else 42L
     plan <- .fpsPrepareCareSiteSqlPlan(schema,settings,site,cap,templateRoot="inst/sql/sql_server")
     old <- suppressWarnings(referenceCareSiteSql(schema,settings,site,cap))
-    stopifnot(identical(plan$batches,old),length(plan$batches[["SitePartition.sql"]]$statements)==7L,
+    unchanged <- setdiff(names(old),c("SitePartition.sql","StudyConcepts.sql"))
+    stopifnot(identical(plan$batches[unchanged],old[unchanged]),
+        length(plan$batches[["SitePartition.sql"]]$statements)==4L,
+        length(plan$batches[["SiteVisits.sql"]]$statements)==3L,
+        ("LimitPartitionPatients.sql" %in% names(plan$batches))==(cap>0L && scenario=="default"),
         ("LimitPatients.sql" %in% names(plan$batches))==(cap>0L))
     count <- count+1L
 }
@@ -31,4 +35,4 @@ for (request in list(list(schema,settings,1,200),list("other",settings,42,200),
     stopifnot(inherits(try(do.call(.fpsGetCareSiteSqlPlan,request),silent=TRUE),"try-error"))
 }
 options(FederatedPs.careSiteSqlPlans=NULL,FederatedPs.sqlPreparationObserver=NULL)
-cat("PASS: 104 complete SQL plans exactly match the archived recipe; 13 studies, 2 scenarios, 2 schemas, caps on/off, numeric sites; setting mismatch rejected\n")
+cat("PASS: 104 complete SQL plans rendered; unchanged cohort/eligibility/covariate SQL matches archived recipe; 13 studies, 2 scenarios, 2 schemas, caps on/off, numeric sites; setting mismatch rejected\n")

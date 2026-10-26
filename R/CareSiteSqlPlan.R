@@ -1,6 +1,6 @@
 # Render and split every clinical SQL template BEFORE opening a JDBC session.
 # No database state is needed: concepts are resolved later by the prepared SQL.
-.fpsSqlPlanRevision <- "sql-plan-3"
+.fpsSqlPlanRevision <- "sql-plan-4"
 
 .fpsPrepareCareSiteSqlPlan <- function(schema, settings, careSiteId, patientLimit = 0L,
         templateRoot = system.file("sql", "sql_server", package = "FederatedPs"),
@@ -32,9 +32,6 @@
             do.call(render, c(list(sql = sql), parameters)), stage = "sql-prepare")
         add(file, rendered)
     }
-    prepare("SitePartition.sql")
-    if (length(batches[["SitePartition.sql"]]$statements) != 7L)
-        stop("SitePartition must contain exactly seven prepared statements")
     ingredients <- list("1" = settings$targetIngredients, "0" = settings$comparatorIngredients)
     atc <- list("1" = settings$targetAtc, "0" = settings$comparatorAtc)
     if (specific) {
@@ -52,6 +49,12 @@
         paste(rows, collapse = ", ")
     }
     prepare("StudyConcepts.sql", ingredient_rows = values(ingredients), atc_rows = values(atc, TRUE))
+    prepare("SitePartition.sql")
+    if (length(batches[["SitePartition.sql"]]$statements) != 4L)
+        stop("SitePartition must contain four prepared statements")
+    if (!specific && patientLimit > 0L) prepare("LimitPartitionPatients.sql", patient_limit = patientLimit)
+    prepare("SiteVisits.sql")
+    prepare("StudyDrugs.sql")
     if (specific) prepare("SpecificStudy.sql", form_policy = settings$formPolicy,
         indication_concept_ids = settings$indicationConceptIds,
         record_type_concept_ids = settings$recordTypeConceptIds, min_age = settings$minAge,

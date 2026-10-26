@@ -35,8 +35,8 @@ error <- tryCatch(.fpsRunSqlStatements(statements, "commit-failure", 1,
 stopifnot(identical(error, original), tail(events,1)[[1]]$operation$status == "failed")
 stopifnot(.fpsSqlStatementLabel("SELECT x INTO #fps_exposure FROM x") == "Populate #fps_exposure",
     .fpsSqlStatementLabel("CREATE UNIQUE CLUSTERED INDEX ix_v ON #v(id)") == "Create index ix_v")
-invisible(.fpsRunSqlStatements(rep("SELECT 1",7),"SitePartition.sql",1,function(sql) 1))
-stopifnot(any(vapply(events, function(x) grepl("Aggregate all positive-site",x$detail), TRUE)))
+invisible(.fpsRunSqlStatements(rep("SELECT 1",4),"SitePartition.sql",1,function(sql) 1))
+stopifnot(any(vapply(events, function(x) grepl("Find study-exposed patients",x$detail), TRUE)))
 options(FederatedPs.progressContext = list(site="17",databaseHash="invented",limit=200))
 historyDir <- file.path(root,"history")
 h <- fp_progress_history(historyDir)

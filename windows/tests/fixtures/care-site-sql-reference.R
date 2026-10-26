@@ -7,7 +7,8 @@ referenceCareSiteSql <- function(schema, settings, careSiteId, patientLimit) {
     batches <- list()
     run <- function(sql, file) batches[[file]] <<- list(sql=sql,statements=SqlRender::splitSql(sql))
     execute <- function(file, ...) {
-        path <- file.path("inst/sql/sql_server", file)
+        path <- file.path("windows/tests/fixtures/pre-study-first", file)
+        if (!file.exists(path)) path <- file.path("inst/sql/sql_server", file)
         if (!nzchar(path)) stop("Missing SQL Server templates; reinstall FederatedPs")
         sql <- paste(readLines(path, warn = FALSE), collapse = "\n")
         sql <- .fpsDbOperation(paste("Rendering", file),

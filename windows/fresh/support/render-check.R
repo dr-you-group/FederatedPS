@@ -10,7 +10,7 @@ settings <- FederatedPs::getStudySettings("ppi","default")
 cat("START: complete local SQL preparation (no DB)\n");flush(stdout())
 for (site in 1:3) {
     plan <- prepare("CDM54_2601.CDM",settings,site,c(200L,100L,300L)[site])
-    stopifnot(length(plan$batches[["SitePartition.sql"]]$statements)==7L,
+    stopifnot(length(plan$batches[["SitePartition.sql"]]$statements)==4L,
               length(plan$batches[["CohortMethod GetCohorts.sql"]]$statements)==1L)
     cat("PASS: complete SQL plan site_id=",site," files=",length(plan$batches),"\n",sep="")
     flush(stdout())

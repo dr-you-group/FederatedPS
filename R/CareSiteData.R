@@ -104,30 +104,7 @@
     if (nrow(institution) != 1L) stop("Expected one CARE_SITE row for careSiteId ", careSiteId)
     .fpsSetClinicalNetworkTimeout(connection)
     .fpsDbStartupState("Connection self-check and CARE_SITE validation passed", ready = TRUE)
-    step(1, "SitePartition.sql: assigning exclusive patients and visits")
-    execute("SitePartition.sql")
-    step(2, "Counting site partition results")
-    partition <- query(sprintf("SELECT
-        (SELECT COUNT_BIG(*) FROM #fps_person) AS exclusive_persons,
-        (SELECT COUNT_BIG(*) FROM #fps_visit) AS linked_visits,
-        (SELECT COUNT_BIG(*) FROM #fps_membership WHERE care_site_id <> last_care_site_id) AS multisite_persons_all_cdm,
-        (SELECT COUNT_BIG(*) FROM %s.VISIT_OCCURRENCE WHERE care_site_id IS NULL OR care_site_id <= 0) AS unattributed_visits_all_cdm", schema))
-    if (partition$exclusivePersons == 0) stop("No patients with visits exclusive to careSiteId ", careSiteId)
-    message("Exclusive persons: ", partition$exclusivePersons, "; linked visits: ", partition$linkedVisits,
-        "; multisite persons excluded (whole CDM): ", partition$multisitePersonsAllCdm)
-    domains <- c("DRUG_EXPOSURE", "CONDITION_OCCURRENCE", "PROCEDURE_OCCURRENCE", "MEASUREMENT")
-    linkage <- do.call(rbind, lapply(domains, function(table) {
-        step(3, paste("Auditing visit linkage:", table))
-        counts <- query(sprintf("SELECT COUNT_BIG(*) AS candidate_records,
-            COALESCE(SUM(CAST(CASE WHEN v.visit_occurrence_id IS NULL THEN 1 ELSE 0 END AS BIGINT)), 0) AS excluded_records
-            FROM %s.%s d JOIN #fps_person p ON p.person_id = d.person_id
-            LEFT JOIN #fps_visit v ON v.visit_occurrence_id = d.visit_occurrence_id AND v.person_id = d.person_id", schema, table))
-        message(table, ": ", counts$excludedRecords, " / ", counts$candidateRecords,
-            " records excluded by visit linkage")
-        data.frame(table = table, counts)
-    }))
-    specific <- settings$scenario == "studySpecific"
-    step(4, "Resolving study concept definitions")
+    step(1, "Resolving study concept definitions")
     execute("StudyConcepts.sql")
     missing <- query(sprintf("SELECT r.ingredient_id FROM #fps_requested_ingredients r WHERE NOT EXISTS (
         SELECT 1 FROM %s.CONCEPT c WHERE c.concept_id = r.ingredient_id
@@ -140,6 +117,42 @@
     comparator <- resolved$ingredientId[resolved$arm == 0]
     if (!length(target) || !length(comparator) || length(intersect(target, comparator)))
         stop("Target and comparator must resolve to nonempty, disjoint ingredient sets")
+    step(1, "SitePartition.sql: study-exposed patients; exclude cross-site visits")
+    execute("SitePartition.sql")
+    if (identical(settings$scenario, "default") && patientLimit > 0L) {
+        step(1, paste("Applying the same default patient cap early:", patientLimit, "persons"))
+        execute("LimitPartitionPatients.sql")
+    }
+    step(1, "SiteVisits.sql: copying all visits of the prepared patients")
+    execute("SiteVisits.sql")
+    step(2, "Counting prepared study patients and visits (local temporary tables)")
+    partition <- query("SELECT
+        (SELECT COUNT_BIG(*) FROM #fps_candidate) AS study_candidates_at_site,
+        (SELECT COUNT_BIG(*) FROM #fps_person) AS prepared_persons,
+        (SELECT COUNT_BIG(*) FROM #fps_visit) AS linked_visits")
+    partition$earlyPatientLimit <- if (identical(settings$scenario, "default")) patientLimit else 0L
+    partition$auditScope <- "study-exposed candidates; prepared persons after exclusivity and any early default cap"
+    # Do not fabricate whole-CDM audit totals: collecting them was another
+    # full-table scan, unrelated to this study's extraction or patient cap.
+    partition$multisitePersonsAllCdm <- NA_real_
+    partition$unattributedVisitsAllCdm <- NA_real_
+    if (partition$preparedPersons == 0) stop("No study-exposed patients exclusive to careSiteId ", careSiteId)
+    message("Study candidates at site: ", partition$studyCandidatesAtSite,
+        "; prepared exclusive persons: ", partition$preparedPersons, "; linked visits: ", partition$linkedVisits)
+    domains <- c("DRUG_EXPOSURE", "CONDITION_OCCURRENCE", "PROCEDURE_OCCURRENCE", "MEASUREMENT")
+    linkage <- do.call(rbind, lapply(domains, function(table) {
+        step(3, paste("Auditing visit linkage:", table))
+        counts <- query(sprintf("SELECT COUNT_BIG(*) AS candidate_records,
+            COALESCE(SUM(CAST(CASE WHEN v.visit_occurrence_id IS NULL THEN 1 ELSE 0 END AS BIGINT)), 0) AS excluded_records
+            FROM %s.%s d JOIN #fps_person p ON p.person_id = d.person_id
+            LEFT JOIN #fps_visit v ON v.visit_occurrence_id = d.visit_occurrence_id AND v.person_id = d.person_id", schema, table))
+        message(table, ": ", counts$excludedRecords, " / ", counts$candidateRecords,
+            " records excluded by visit linkage")
+        data.frame(table = table, counts, auditScope = partition$auditScope)
+    }))
+    specific <- settings$scenario == "studySpecific"
+    step(4, "Fetching study drugs for prepared site patients")
+    execute("StudyDrugs.sql")
     step(5, "Building study exposures")
     if (specific) {
         roots <- query(sprintf("SELECT concept_id FROM %s.CONCEPT WHERE domain_id = 'Condition'

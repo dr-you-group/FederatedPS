@@ -129,7 +129,8 @@ RUN은 60초 제한의 독립 SQL 렌더링 점검이 성공한 뒤 아래 옵�
 한 기관이 전처리 중이면 다음 기관이 queued로 표시됩니다. federated는 실행하지 않습니다.
 실제 분석 전 환자 제한을 바꾸려면 RUN.ps1의 PatientLimits를 편집하거나 05를 직접 실행하십시오.
 0은 제한 없음이고, 2 이상의 값은 기관별 상한입니다. 후속 기준 적용 후 최종 환자는 더 적을 수 있습니다.
-환자 제한은 노출 후보 생성 뒤 CohortMethod 전에 적용되며 전체 SitePartition 스캔을 줄이지 않습니다.
+default는 동일한 환자 선택 규칙으로 방문 복사 전에 상한을 적용합니다. 초기 약제 후보 검색은 더 많은 행을 읽을 수 있습니다.
+studySpecific은 기존처럼 적격성 판단 뒤 CohortMethod 전에 상한을 적용합니다.
 
 기관별 추출·population·공변량·설계행렬이 모두 정상 완료된 캐시만 동일 조건에서 재사용합니다.
 SitePartition/CohortMethod 중간 단계만 끝난 상태는 재개 체크포인트가 아닙니다.
@@ -150,7 +151,7 @@ SitePartition/CohortMethod 중간 단계만 끝난 상태는 재개 체크포인
 ```
 
 R, Rtools, Java, Cyclops를 다시 설치할 필요가 없습니다. 실행 전 확인에
-`[jdbc-probe-2; sql-plan-3]`가 표시되어야 합니다. 같은 0.0.10이라도 설치된 패키지가 구버전이면
+`[jdbc-probe-2; sql-plan-4]`가 표시되어야 합니다. 같은 0.0.10이라도 설치된 패키지가 구버전이면
 분석을 시작하지 않고 업데이트 명령을 안내합니다.
 
 0단계는 `db-startup-watchdog.log`에 기관별 현재 호출과 경과/제한 시간을 기록합니다.
@@ -179,17 +180,23 @@ CohortMethod의 원래 템플릿과 조건, 실행 순서, 최종 commit, 분할
 넘으면 진단을 기록하고 이 실행의 프로세스를 정리합니다. 자동 재시도하지 않습니다.
 진단/종료 시간은 추가될 수 있습니다. 이 60초는 임상 SQL 실행 제한이 아닙니다.
 
-정상 로그 순서는 `prepare SQL <site_id>: Rendering ... before DB connection`,
-`Prepared ... SQL files`, 연결/CARE_SITE 확인, `Using prepared SitePartition.sql`,
-`SitePartition.sql SQL 1/7`입니다. 실제 SQL 1/7은 전체 방문의 기관 소속 집계이므로
-환자 제한 200명이라도 DB 규모/실행 계획에 따라 오래 걸릴 수 있습니다.
-SQL 문장 수의 진행률과 경과 시간을 표시하며 근거 없는 행 진행률/ETA를 만들지 않습니다.
+최신 `sql-plan-4`는 실제 SQL 실행량도 줄입니다. 연구 약제 매핑 → 해당 기관의 노출 후보
+→ 다른 양수 기관 방문자 제외 → default의 기존 환자 상한 → 방문 복사 순서입니다.
+따라서 RUN 기본값은 방문 복사 전에 site_id 1/2/3을 각각 200/100/300명으로 제한합니다.
+초기 후보 검색은 여전히 큰 테이블을 읽을 수 있습니다. studySpecific은 기존처럼
+적격성 판단 뒤에 상한을 적용합니다. 선택한 환자의 전체 관련 이력과 CohortMethod 조건을 유지합니다.
+
+새 로그는 `StudyConcepts.sql` → `SitePartition.sql SQL 1/4` →
+`LimitPartitionPatients.sql`(default 제한 시) → `SiteVisits.sql SQL 1/3` 순서입니다.
+실행 중인 SQL에는 행 진행률을 알 수 없다는 표시와 경과 시간을 제공합니다.
+전체 CDM 감사 집계는 NA(미집계), 준비된 환자의 집계는 범위를 명시해 저장합니다.
 
 준비 SQL은 `extraction\<site_id>\sql-diagnostics\prepared-*.sql`,
-준비 상태는 `sql-prepare-state.json`, 외부 감시는 `sql-prepare-watchdog.log`,
-시간 초과는 `sql-prepare-timeout-<site_id>.json`에 기록합니다.
-104개 설정 조합에서 이전 렌더링 결과와 일치함을 검사했습니다.
-실제 Windows/HIWARE/YUHS DB에서의 실행 성공은 여기서 검증하지 못했습니다.
+준비 상태는 `sql-prepare-state.json`, 외부 감시는 `sql-prepare-watchdog.log`에 기록합니다.
+49개 이전/새 추출 비교와 104개 SQL 준비 조합을 검사했습니다.
+실제 Windows/HIWARE/YUHS DB의 실행 시간은 검증하지 못했습니다.
+자세한 변경 범위는 `FederatedPS\windows\STUDY_FIRST_EXTRACTION_KO.md`에 있습니다.
+인덱스 확인은 DBeaver에서 `diagnostics\CheckExtractionIndexes.sql`을 실행하십시오.
 
 실행 중 정체가 재현되면 다른 PowerShell 창에서, 화면의 Output 경로를 넣어 실행합니다.
 

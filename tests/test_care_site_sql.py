@@ -33,6 +33,12 @@ def execute(db, text):
             continue
         if isinstance(statement, exp.Create) and statement.args.get("kind") == "INDEX":
             continue
+        if isinstance(statement, exp.Delete) and statement.args.get("tables"):
+            # T-SQL DELETE alias FROM table alias -> DuckDB DELETE FROM table alias.
+            # Only the target-alias syntax changes; keep the CTE/WHERE intact.
+            assert len(statement.args["tables"]) == 1
+            assert statement.args["tables"][0].name == statement.this.alias
+            statement.set("tables", None)
         db.execute(statement.sql(dialect="duckdb"))
 
 
@@ -102,8 +108,10 @@ def fixture():
 
 def prepare(site):
     db = fixture()
-    execute(db, render("SitePartition.sql", care_site_id=site))
     execute(db, render("StudyConcepts.sql", ingredient_rows="(1,100),(0,200),(-1,100),(-1,200)", atc_rows="(1,'')"))
+    execute(db, render("SitePartition.sql", care_site_id=site))
+    execute(db, render("SiteVisits.sql", care_site_id=site))
+    execute(db, render("StudyDrugs.sql"))
     return db
 
 

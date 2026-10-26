@@ -13,9 +13,12 @@ try {
         unit='extraction steps (not time)';etaSeconds=$null;timestamp=$now.ToString('o');
         siteId='17';siteState='extracting';operation=[pscustomobject]$op;role='baselines'}
     $v=Get-FederatedProgressDisplay ([pscustomobject]$e) $false $now
-    if($v.Percent -ne 14 -or $v.Eta -ne 80 -or $v.Text -notmatch '00:00:40'){throw 'Statement progress / historical ETA wrong'}
+    if($v.Percent -ne -1 -or $v.Eta -ne 80 -or $v.Text -notmatch '00:00:40' -or $v.Status -notmatch 'rows unknown'){throw 'Statement progress / historical ETA wrong'}
     $v=Get-FederatedProgressDisplay ([pscustomobject]$e) $false $now.AddSeconds(100)
     if($v.Eta -ne -1 -or $v.Text -notmatch 'exceeded'){throw 'Overdue SQL must not claim zero remaining'}
+    $op.status='completed';$op.statementsCompleted=2;$op.elapsedSeconds=40;$e.operation=[pscustomobject]$op
+    if((Get-FederatedProgressDisplay ([pscustomobject]$e) $false $now).Percent -ne 28){throw 'Completed-statement count lost'}
+    $op.status='started';$op.statementsCompleted=1;$op.elapsedSeconds=0
     $op.historyEstimate=$null;$e.operation=[pscustomobject]$op
     if((Get-FederatedProgressDisplay ([pscustomobject]$e)).Eta -ne -1){throw 'Cold SQL invented an ETA'}
     $e | ConvertTo-Json -Depth 6 -Compress | Set-Content (Join-Path $root 'baselines/sites/17.json')

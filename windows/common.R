@@ -16,7 +16,7 @@ fp_verify_db_runtime_revision <- function(installedRevision = tryCatch(
 
 fp_verify_sql_plan_revision <- function(installedRevision = tryCatch(
         utils::getFromNamespace(".fpsSqlPlanRevision", "FederatedPs"), error=function(e) NULL)) {
-    if (!identical(installedRevision,"sql-plan-3"))
+    if (!identical(installedRevision,"sql-plan-4"))
         stop("Installed FederatedPs lacks the SQL preparation fix. Run 10_UPDATE_PACKAGE.ps1, then start a new R process.")
     invisible(TRUE)
 }
@@ -55,7 +55,7 @@ fp_verify_runtime <- function(project) {
         stop("SQL Server JDBC missing; transfer the new payload and run Install-Offline.ps1")
     rJava::.jinit()
     if (!"ppi" %in% FederatedPs::listStudies()$study) stop("Study metadata missing")
-    cat("PASS: offline R, block Cyclops, FederatedPs, JVM and JDBC [jdbc-probe-2; sql-plan-3]\n")
+    cat("PASS: offline R, block Cyclops, FederatedPs, JVM and JDBC [jdbc-probe-2; sql-plan-4]\n")
     invisible(TRUE)
 }
 

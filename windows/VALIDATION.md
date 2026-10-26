@@ -1,3 +1,38 @@
+## Study-first extraction revision 4 (2026-10-26)
+
+Remove the per-site whole-CDM VISIT_OCCURRENCE membership aggregation. Resolve
+study drug concepts first, find dated/site-linked exposure candidates, and
+exclude people with ANY other positive care_site_id via NOT EXISTS. For default,
+apply the identical first-arm/person-id interleaving cap before materializing
+visits; retain all visits and drug history for selected persons. studySpecific
+keeps its cap after eligibility. CohortMethod and feature criteria are unchanged.
+Whole-CDM audit counts are explicitly NA; prepared-patient audit scope is recorded.
+In-flight SQL is indeterminate in the UI, with completed-statement counts intact.
+
+Validation in this environment (Linux, not live SQL Server):
+
+- 49 old/new pipeline comparisons using parsed T-SQL adapted to DuckDB 1.4.3
+  by sqlglot 28.3.0. Exact exposure rows, selected-person visits and drug history
+  match. Includes two scenarios, capped/unlimited, 2,000 randomized additional
+  persons, arm ties/crossovers, null dates, invalid/mismatched visits and positive
+  site IDs outside 1/2/3. Index DDL omitted; no timing claim is made from DuckDB.
+- Existing clinical fixture covers site separation, binary covariates, washout,
+  age, observation periods, concurrent arms and acute-episode cutoff.
+- SQLite membership test compares the candidate anti-join with original
+  whole-CDM membership for exposed patients, including null/nonpositive sites.
+- Actual SqlRender 1.19.7/CohortMethod 6.0.3 resources render 104 plans. Untouched
+  eligibility, cap, cohort and covariate SQL matches the archived recipe.
+- Production R extraction order (default/specific, capped/unlimited), runtime
+  revision rejection, R parsing, SQL progress/error cleanup and pure-R updater.
+- PowerShell monitor/site-state/ETA behavior and Fresh/method-routing regressions.
+
+This eliminates confirmed unnecessary work; it does not establish whether the
+user's live wait is a scan, lock, I/O, poor plan or driver/proxy stall. Candidate
+search and exclusivity still require database work. Index metadata diagnostics
+are provided without performance DMVs. No persistent CDM indexes, NOLOCK hints,
+clinical criteria, Cyclops, TLS policy, or timeout/retry policy are changed.
+Existing cache files remain, but extraction source changes invalidate old keys.
+
 ## SQL preparation revision 3 (2026-10-26)
 
 The reported last event is a local SqlRender call after successful DB startup.
