@@ -1,9 +1,10 @@
 # FederatedPs 0.0.10: 전처리 우선 실행과 기관별 진행 상황
 
-최신 실행기 핫픽스는 [PREPROCESS_FIRST_KO.md](PREPROCESS_FIRST_KO.md)를 참조하십시오.
-0.0.10 설치가 완료된 환경에서는 R 패키지 재설치 없이 적용합니다.
-Cyclops proximal CCD, R, Java, JDBC를 다시 설치하지 않습니다.
-`windows/common.R`의 SSL 수정, `yuhs.Renviron`, 결과 및 캐시 파일을 덮어쓰지 않습니다.
+최신 `sql-plan-3` 수정은 DB 연결 전에 SQL 전체를 준비하도록 R 패키지와 실행기를 함께 바꿉니다.
+Fresh 설치본에서는 패치 적용 후 `10_UPDATE_PACKAGE.ps1`로 FederatedPs를 재설치하십시오.
+Cyclops, R, Java, JDBC 재설치는 필요하지 않습니다. 적용 순서는
+[fresh/README_KO.md](fresh/README_KO.md)의 SQL 준비 정체 수정 절을 참조하십시오.
+이전 실행기만 바뀐 핫픽스의 설치 생략 안내는 이번 수정에 적용되지 않습니다.
 
 ## 적용과 실행
 
@@ -45,6 +46,15 @@ BLAS/OpenMP와 Cyclops의 기존 1-thread 설정을 유지해 기관 병렬화 �
 이미 정상 완료된 기관 캐시는 유지합니다. 다음 실행에서 같은 조건의 완료 캐시를 재사용합니다.
 모델 프로세스는 기관 작업이 지정한 정확한 캐시 세대를 읽으며, 준비 데이터가 손상/누락되면
 자동 재추출이나 다른 캐시로 대체하지 않고 오류를 보고합니다.
+
+## SQL 준비와 실제 조회 구분
+
+첫 JDBC 연결 전에 모든 기관의 SQL을 생성·분리합니다. 이때 `preparing-sql (no DB)`로 표시합니다.
+SitePartition, StudyConcepts, 노출/제한, CohortMethod, 공변량 SQL의 준비를 마친 뒤
+DB 확인과 추출을 시작합니다. 추출에서는 `Using prepared ...` 및 `SQL i/N`이 표시됩니다.
+준비 호출마다 60초의 독립 감시가 적용되며 `sql-prepare-watchdog.log`에 대기 시간을 남깁니다.
+이 제한은 실제 임상 쿼리에 적용하지 않습니다. 시간 초과 시 자동 재시도하지 않습니다.
+완료 캐시를 삭제하지 않지만 추출 소스 지문 변경으로 기존 캐시가 재사용되지 않을 수 있습니다.
 
 ## 0/10 Connection self-check 장시간 대기 방지
 

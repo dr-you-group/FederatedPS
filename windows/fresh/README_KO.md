@@ -150,7 +150,7 @@ SitePartition/CohortMethod 중간 단계만 끝난 상태는 재개 체크포인
 ```
 
 R, Rtools, Java, Cyclops를 다시 설치할 필요가 없습니다. 실행 전 확인에
-`[jdbc-probe-2]`가 표시되어야 합니다. 같은 0.0.10이라도 설치된 패키지가 구버전이면
+`[jdbc-probe-2; sql-plan-3]`가 표시되어야 합니다. 같은 0.0.10이라도 설치된 패키지가 구버전이면
 분석을 시작하지 않고 업데이트 명령을 안내합니다.
 
 0단계는 `db-startup-watchdog.log`에 기관별 현재 호출과 경과/제한 시간을 기록합니다.
@@ -161,16 +161,35 @@ R, Rtools, Java, Cyclops를 다시 설치할 필요가 없습니다. 실행 전 
 자동 재사용되지 않을 수 있습니다. 미완료된 0단계에는 재개할 코호트가 없습니다.
 실제 HIWARE 경로에서 이번 정체의 직접 원인은 대상 서버 로그로 확인해야 합니다.
 
-## 5. 알려진 SQL 생성 정체와 진단
+## 5. SQL 준비 정체 수정 (`sql-plan-3`)
 
-이 통합 설치본은 이전 로그의 `Rendering SitePartition.sql` 정체 원인을 해결했다고 주장하지 않습니다.
-이전 로그는 DB 연결과 CARE_SITE 조회 완료 후 SQL 생성 구간에서 멈췄으며,
-JVM 스레드 덤프가 없어 해당 호출 내부의 원인은 아직 미확정입니다.
+`Rendering SitePartition.sql [started]`는 로컬 SQL 문자열을 만드는 호출의 시작 기록입니다.
+이 호출이 몇 시간 걸리는 것은 정상적인 CDM 조회 시간이 아닙니다. 이전 코드에서는
+DB 연결 뒤 각 템플릿을 렌더링했고, DBI 실행·조회 래퍼에서도 문장 분리를 다시 호출했습니다.
+대상 Windows의 스레드 기록이 없으므로 그 안에서 멈춘 직접 원인은 아직 미확정입니다.
 
-새 로컬 점검은 DB에 접속하지 않고 설치된 SqlRender가 세 기관의 SitePartition SQL을
-생성하고 7개 문장으로 나누는지 검사합니다. 60초가 지나면 진단을 수집하고 이 점검이 시작한
-프로세스만 정리합니다. 이 검사가 통과해도 **실제 DB 연결 후 동일 구간의 정체가 해결됐다는 뜻은 아닙니다.**
-본 분석의 렌더링에는 아직 별도 외부 타임아웃을 추가하지 않았습니다.
+이번 수정은 순차 실행에서 **모든 기관의 SQL 준비를 첫 DB 연결 전으로 이동**합니다.
+SitePartition뿐 아니라 StudyConcepts, 노출/환자 제한, CohortMethod, 공변량 SQL도
+미리 생성하고 문장으로 나눕니다. 병렬 옵션에서는 각 기관 작업이 자기 연결 전에 준비합니다.
+DB 연결 이후에는 준비된 문장을 순서대로 실행하며 SQL 렌더링/분리를 다시 호출하지 않습니다.
+CohortMethod의 원래 템플릿과 조건, 실행 순서, 최종 commit, 분할 데이터 전송은 유지합니다.
+
+`RUN.ps1`의 로컬 사전 검사는 동일한 전체 SQL 준비 함수를 세 기관에 적용합니다.
+본 분석에도 별도 PowerShell 감시를 추가했습니다. 각 로컬 생성/분리 호출이 60초를
+넘으면 진단을 기록하고 이 실행의 프로세스를 정리합니다. 자동 재시도하지 않습니다.
+진단/종료 시간은 추가될 수 있습니다. 이 60초는 임상 SQL 실행 제한이 아닙니다.
+
+정상 로그 순서는 `prepare SQL <site_id>: Rendering ... before DB connection`,
+`Prepared ... SQL files`, 연결/CARE_SITE 확인, `Using prepared SitePartition.sql`,
+`SitePartition.sql SQL 1/7`입니다. 실제 SQL 1/7은 전체 방문의 기관 소속 집계이므로
+환자 제한 200명이라도 DB 규모/실행 계획에 따라 오래 걸릴 수 있습니다.
+SQL 문장 수의 진행률과 경과 시간을 표시하며 근거 없는 행 진행률/ETA를 만들지 않습니다.
+
+준비 SQL은 `extraction\<site_id>\sql-diagnostics\prepared-*.sql`,
+준비 상태는 `sql-prepare-state.json`, 외부 감시는 `sql-prepare-watchdog.log`,
+시간 초과는 `sql-prepare-timeout-<site_id>.json`에 기록합니다.
+104개 설정 조합에서 이전 렌더링 결과와 일치함을 검사했습니다.
+실제 Windows/HIWARE/YUHS DB에서의 실행 성공은 여기서 검증하지 못했습니다.
 
 실행 중 정체가 재현되면 다른 PowerShell 창에서, 화면의 Output 경로를 넣어 실행합니다.
 

@@ -11,6 +11,13 @@ $child=Join-Path $root 'child.ps1'
 param($ConfigFile,$Site)
 $c=Get-Content $ConfigFile -Raw | ConvertFrom-Json
 $start=[DateTime]::UtcNow
+if($c.runId -eq 'sqlhang') {
+    $d=Join-Path $c.output ('extraction/'+$Site);New-Item -ItemType Directory -Path $d -Force | Out-Null
+    @{runId=$c.runId;site=$Site;pid=$PID;id='render1';status='started';
+        label='Rendering SitePartition.sql before DB connection';startedUtc=$start.ToString('o')} |
+        ConvertTo-Json | Set-Content (Join-Path $d 'sql-prepare-state.json')
+    Start-Sleep -Seconds 20
+}
 if($c.runId -in @('dbhang','dbready')) {
     $d=Join-Path $c.output ('extraction/'+$Site);New-Item -ItemType Directory -Path $d -Force | Out-Null
     $record=@{runId=$c.runId;site=$Site;pid=$PID;startedUtc=$start.ToString('o')}
@@ -46,12 +53,12 @@ function Start-FederatedRWorker {
         -WorkingDirectory $root -LogPrefix $LogPrefix -Role $Role
 }
 try {
-    foreach($case in @('ok1','ok2','ok3','dbready','dbhang','fail','latefail','missing','stale','badname','hang','timeout')) {
+    foreach($case in @('ok1','ok2','ok3','dbready','dbhang','sqlhang','fail','latefail','missing','stale','badname','hang','timeout')) {
         $directory=Join-Path $root $case;New-Item -ItemType Directory -Path $directory | Out-Null
         $config=Join-Path $directory 'run.json'
         @{runId=$case;output=$directory} | ConvertTo-Json | Set-Content $config
         $m=New-FederatedMonitor $directory @('17','42','99') -NoProgress -StatusSeconds 60
-        $guard=New-FederatedDbWatchdog $directory $case @('17','42','99') 1
+        $guard=New-FederatedDbWatchdog $directory $case @('17','42','99') 1 -SqlPreparationTimeoutSeconds 1
         $workers=@();$errorMessage=''
         try {
             $seconds=if($case -eq 'timeout'){1}else{25}
@@ -70,7 +77,7 @@ try {
             foreach($point in @($points | Sort-Object At,Delta)){$active+=$point.Delta;$peak=[Math]::Max($peak,$active)}
             if($peak -ne $limit){throw "Expected overlap of $limit workers; got $peak"}
         } else {
-            $expected=@{dbhang='DB startup exceeded 1s.*JDBC executeQuery';fail='exit 7';latefail='exit 9';missing='without an extraction receipt';stale='Invalid extraction receipt';badname='Invalid extraction receipt';hang='did not exit normally';timeout='Whole-run timeout'}[$case]
+            $expected=@{dbhang='DB startup exceeded 1s.*JDBC executeQuery';sqlhang='Local SQL preparation exceeded 1s';fail='exit 7';latefail='exit 9';missing='without an extraction receipt';stale='Invalid extraction receipt';badname='Invalid extraction receipt';hang='did not exit normally';timeout='Whole-run timeout'}[$case]
             if($errorMessage -notmatch $expected){throw "Wrong $case failure: $errorMessage"}
             if($workers.Count -gt 2){throw 'Started queued work after failure'}
             foreach($w in $workers){if($null -eq $w.FinalExitCode){throw 'Owned worker not reaped after failure'}}

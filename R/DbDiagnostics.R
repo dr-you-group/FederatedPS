@@ -40,6 +40,10 @@
             is.finite(result) && result >= 0) as.numeric(result) else NA_real_
         info <- c(list(id = operation, status = status, startedUtc = startedUtc,
             elapsedSeconds = elapsed, sqlFile = sqlFile, rowsFetched = rows, rowsAffected = affected), statement)
+        if (identical(stage, "sql-prepare")) {
+            observer <- getOption("FederatedPs.sqlPreparationObserver")
+            if (is.function(observer)) observer(c(info, list(label = label)))
+        }
         if (!is.null(statement)) info$statementsCompleted <- statement$statementIndex - as.integer(status != "completed")
         .fpsProgress(stage, detail, completed, total, unit, operation = info)
         .fpsDiagnosticWrite("operations.tsv", paste(
@@ -150,7 +154,7 @@
 .fpsSmallSqlQuery <- function(connection, sql, columns) {
     timeout <- getOption("FederatedPs.smallQueryTimeoutSeconds")
     if (is.null(timeout))
-        return(DatabaseConnector::querySql(connection, sql, snakeCaseToCamelCase = TRUE))
+        return(.fpsQuerySqlServer(connection, sql))
     if (!methods::is(connection, "DatabaseConnectorJdbcConnection"))
         stop("Bounded SQL Server checks require DatabaseConnector's JDBC connection")
     timeout <- .fpsSmallQueryTimeout(timeout)

@@ -63,5 +63,32 @@ try {
     $evidence=Get-Content (Join-Path $root 'db-startup-timeout-99.json') -Raw | ConvertFrom-Json
     if($evidence.phaseElapsedSeconds -ne 76 -or $evidence.operationLimitSeconds -ne 75){throw 'Wrong phase timeout evidence'}
     if(-not(Test-Path (Join-Path $root 'db-startup-watchdog.log'))){throw 'Missing independent startup status log'}
+    # Local rendering is guarded before any DB connection exists. Completion
+    # and a prior DB ready marker must not hide a later stuck preparation.
+    $g=New-FederatedDbWatchdog $root sqlrun @('55')
+    $c=FixtureWorker baselines 1005
+    $d=Join-Path $root 'extraction/55';New-Item -ItemType Directory -Path $d -Force | Out-Null
+    $p=Join-Path $d 'sql-prepare-state.json'
+    $record=@{runId='sqlrun';site='55';pid=1005;id='render1';status='started';
+        label='Rendering SitePartition.sql before DB connection';startedUtc=$now.AddSeconds(-59).ToString('o')}
+    $record | ConvertTo-Json | Set-Content $p
+    Update-FederatedDbWatchdog $g @($c) $now
+    '{' | Set-Content $p
+    $caught=$false
+    try{Update-FederatedDbWatchdog $g @($c) $now.AddSeconds(2)}catch{$caught=$_.Exception.Message -match 'Local SQL preparation exceeded 60s.*site_id=55'}
+    if(-not $caught -or -not(Test-Path (Join-Path $root 'sql-prepare-timeout-55.json'))){throw 'Local render not guarded'}
+    $record.status='completed';$record | ConvertTo-Json | Set-Content $p
+    Update-FederatedDbWatchdog $g @($c) $now.AddHours(1)
+    $g.Ready['baselines:55']=$true
+    $record.status='started';$record.id='split2';$record.startedUtc=$now.AddSeconds(-61).ToString('o')
+    $record | ConvertTo-Json | Set-Content $p
+    $caught=$false
+    try{Update-FederatedDbWatchdog $g @($c) $now}catch{$caught=$_.Exception.Message -match 'Local SQL preparation exceeded'}
+    if(-not $caught){throw 'DB readiness hid SQL preparation deadline'}
+    $record.pid=9999;$record | ConvertTo-Json | Set-Content $p
+    $caught=$false
+    try{Update-FederatedDbWatchdog $g @($c) $now}catch{$caught=$_.Exception.Message -match 'Invalid SQL preparation marker identity'}
+    if(-not $caught){throw 'Foreign SQL preparation marker accepted'}
+    Write-Host 'PASS: local SQL preparation guarded before DB startup and after DB ready; partial snapshot, completion, foreign PID cases'
     Write-Host 'PASS: startup deadline independent of progress; atomic start/ready identity; malformed optional phase; no DB/sample/cache path; sequential and parallel roles; long clinical work exempt'
 } finally {Remove-Item -LiteralPath $root -Recurse -Force}

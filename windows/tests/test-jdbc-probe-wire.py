@@ -25,7 +25,7 @@ def read(c):
   if status&1:return typ,data
 
 def send(c,b):c.sendall(struct.pack('!BBHHBB',4,1,len(b)+8,0,1,0)+b)
-def done(rows=0):return b'\xfd'+struct.pack('<HHQ',0x10 if rows else 0,0,rows)
+def done(rows=0,cmd=0):return b'\xfd'+struct.pack('<HHQ',0x10 if rows else 0,cmd,rows)
 def col(name):return struct.pack('<IHBB',0,0,0x38,len(name))+name.encode('utf-16le')
 for mode in ['old','new']:
  sock=socket.socket();sock.bind(('127.0.0.1',0));sock.listen(1);port=sock.getsockname()[1];events=[];errors=[]
@@ -49,6 +49,7 @@ for mode in ['old','new']:
       time.sleep(3);break
      elif sql.startswith('SELECT CAST(1'):
       send(c,b'\x81\x02\x00'+col('ok')+col('session_id')+b'\xd1'+struct.pack('<ii',1,70)+done(1))
+     elif sql=='SELECT 1 AS person_id INTO #fixture': send(c,done(3000000000,0xC2))
      else: send(c,done())
   except EOFError:pass
   except Exception as e:errors.append(repr(e))
@@ -60,5 +61,5 @@ for mode in ['old','new']:
  if p.returncode and mode=='new': print(p.stderr,flush=True)
  assert not errors
  if mode=='old':assert p.returncode!=0 and 'SET ROWCOUNT 2' in events and not any(s.startswith('SELECT CAST') for s in events)
- else:assert p.returncode==0 and 'SET ROWCOUNT 2' not in events and any(s.startswith('SELECT CAST') for s in events)
+ else:assert p.returncode==0 and 'SET ROWCOUNT 2' not in events and any(s.startswith('SELECT CAST') for s in events) and events.count('SELECT 1 AS person_id INTO #fixture')==1
 print('PASS: production R probe + actual pinned JDBC 9.2.0: old probe blocks on hidden SET ROWCOUNT, new probe executes SELECT directly')

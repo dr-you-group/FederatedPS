@@ -45,6 +45,8 @@ getDbStudyData <- function(connectionDetails, cdmDatabaseSchema, study = "opioid
     patientLimit <- .validatePatientLimit(patientLimit)
     settings <- getStudySettings(study, scenario)
     .validateCdmSchema(cdmDatabaseSchema)
+    sqlPlan <- if (identical(connectionDetails$dbms, "sql server"))
+        .fpsGetCareSiteSqlPlan(cdmDatabaseSchema, settings, careSiteId, patientLimit) else NULL
     .fpsDbStartupState("Opening JDBC database connection")
     .fpsProgress("connecting", "Opening database connection")
     connection <- .fpsDbOperation("Opening database connection",
@@ -59,7 +61,7 @@ getDbStudyData <- function(connectionDetails, cdmDatabaseSchema, study = "opioid
     .fpsProgress("connected", "Database connection established")
     dbms <- DatabaseConnector::dbms(connection)
     if (identical(dbms, "sql server")) {
-        return(.getCareSiteStudyData(connection, cdmDatabaseSchema, settings, careSiteId, patientLimit))
+        return(.getCareSiteStudyData(connection, cdmDatabaseSchema, settings, careSiteId, patientLimit, sqlPlan))
     }
     if (patientLimit > 0L) stop("patientLimit is supported only for SQL Server care-site studies")
     if (!identical(dbms, "postgresql") || !is.null(careSiteId) ||

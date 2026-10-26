@@ -84,6 +84,14 @@ main <- function() {
     } else FederatedPs::getStudySettings(config$study, config$scenario)
     cat("Selected methods:", paste(config$methods, collapse = ", "), "\n")
     cat("PS are in-sample; fixed Laplace variance", config$priorVariance, "; no cross-validation.\n")
+    coordinator <- is.null(prepareSite) && !is.null(config$extractionWorkers) && config$extractionWorkers > 1L
+    if (!isTRUE(config$test) && !coordinator) {
+        fp_prepare_sql_plans(config, if (is.null(prepareSite)) config$sites else prepareSite,
+            setContext = function(site) {
+                context$label <- paste("prepare SQL",site)
+                context$site <- site; context$state <- "preparing-sql (no DB)"
+            })
+    }
     cacheRecords <- list()
     designs <- list()
     for (site in if (is.null(prepareSite)) config$sites else prepareSite) {

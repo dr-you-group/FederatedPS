@@ -33,7 +33,36 @@ fp_configure_db_runtime <- function(config, out) {
         package = as.character(utils::packageVersion("FederatedPs")),
         driver = as.character(utils::packageVersion("DatabaseConnector"))))
     options(FederatedPs.dbStartupObserver = fp_db_startup_reporter(config, out, site))
+    options(FederatedPs.sqlPreparationObserver = fp_sql_preparation_reporter(config, out, site))
     invisible(directory)
+}
+
+fp_sql_preparation_reporter <- function(config, out, site) {
+    function(operation) {
+        record <- c(list(runId=config$runId, site=site, pid=Sys.getpid()), operation)
+        jsonlite::write_json(record, file.path(out,"sql-prepare-state.json"), auto_unbox=TRUE, pretty=TRUE)
+        invisible(NULL)
+    }
+}
+
+fp_prepare_sql_plans <- function(config, sites, setContext = function(site) NULL,
+        prepare = utils::getFromNamespace(".fpsPrepareCareSiteSqlPlan", "FederatedPs")) {
+    # Only read configuration here. No driver/DB connection is created. In a
+    # sequential run ALL site plans precede the first connection, including
+    # when the second/third site would otherwise render in a used JDBC JVM.
+    values <- fp_read_connection_values(file.path(config$configDirectory,"yuhs.Renviron"), yuhs=TRUE)
+    settings <- FederatedPs::getStudySettings(config$study, config$scenario)
+    plans <- list()
+    for (site in sites) {
+        setContext(site)
+        out <- file.path(config$output,"extraction",site)
+        dir.create(out,recursive=TRUE,showWarnings=FALSE)
+        fp_configure_db_runtime(config,out)
+        id <- config$careSites[[site]]
+        plans[[as.character(id)]] <- prepare(values$CDM_DATABASE_SCHEMA,settings,id,config$patientLimits[[site]])
+    }
+    options(FederatedPs.careSiteSqlPlans=plans)
+    invisible(NULL)
 }
 
 fp_db_startup_reporter <- function(config, out, site) {

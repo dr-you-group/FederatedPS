@@ -3,6 +3,7 @@ args <- commandArgs(trailingOnly=TRUE)
 stopifnot(length(args)==4L, grepl("^[0-9]+$",args[3]))
 source(file.path(args[1],"R","Progress.R"))
 source(file.path(args[1],"R","DbDiagnostics.R"))
+source(file.path(args[1],"R","SqlProgress.R"))
 rJava::.jinit(classpath=normalizePath(args[2],mustWork=TRUE))
 main <- function() {
     ds <- rJava::.jnew("com/microsoft/sqlserver/jdbc/SQLServerDataSource")
@@ -28,6 +29,9 @@ main <- function() {
     options(FederatedPs.clinicalNetworkTimeoutMillis=7215000L)
     .fpsSetClinicalNetworkTimeout(methods::new("WireFixtureConnection",jConnection=connection))
     stopifnot(rJava::.jcall(connection,"I","getNetworkTimeout")==7215000L)
-    cat("PASS SELECT 1\n")
+    affected <- .fpsJdbcExecutePrepared(connection,"SELECT 1 AS person_id INTO #fixture")
+    cat("Rows affected:",affected,"\n")
+    stopifnot(affected==3000000000)
+    cat("PASS SELECT 1 and prepared SQL with 64-bit row count\n")
 }
 main()

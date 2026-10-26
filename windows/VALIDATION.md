@@ -1,3 +1,43 @@
+## SQL preparation revision 3 (2026-10-26)
+
+The reported last event is a local SqlRender call after successful DB startup.
+The previous startup watchdog did not cover it. Prepare and split all site SQL
+before the first JDBC connection in sequential runs (before each worker's
+connection in parallel runs). Reuse those immutable, settings-checked plans
+through extraction. Use one direct JDBC executeLargeUpdate per prepared
+statement, the original final commit, and DatabaseConnector DBI fetch batches
+and numeric conversion without its extra SqlRender wrappers. No retries.
+
+The optional progress observer is separate from a 60-second PowerShell local
+preparation watchdog. Preserve per-site state, partial-snapshot continuity,
+prepared SQL and timeout evidence; the owner captures threads and stops its
+workers. Fresh preflight uses the same full preparation function. The installed
+sql-plan-3 revision is required, even when the package version is still 0.0.10.
+
+Validated with Linux R 4.3.3, OpenJDK 17 and PowerShell 7.4.6:
+
+- Actual bundled SqlRender 1.19.7 and CohortMethod 6.0.3 SQL: all generated SQL
+  and split statements match the archived 3c215a2 recipe in 104 combinations
+  (13 studies, 2 scenarios, 2 schemas, unlimited/capped, numeric site IDs).
+- Settings mismatch rejection; preparation before connect; local preparation
+  failure causes no DB call; all sequential sites get their own cap/plan.
+- Streaming batch sizes, typed empty tables, NULL rows, single-fetch queries,
+  resource cleanup and original errors; statement execution and final commit.
+- Actual pinned JDBC 9.2.0 + production R against a loopback TDS fixture: SELECT
+  probe then a prepared statement exactly once; 64-bit affected row count.
+- Independent SQL preparation deadlines before DB markers and after DB ready,
+  completed/partial/foreign-PID states; real hung child cleanup with queued
+  sites cancelled; existing sequential/parallel and all method routes.
+- R/PowerShell parsing, SSL-off preservation, Fresh RUN defaults and updater gates.
+
+This does not establish the JNI/JVM root cause on the user's Windows host and
+is not a live Windows/HIWARE/YUHS integration test. It removes the reported
+post-connection rendering path and bounds local preparation. No clinical SQL
+criteria, Cyclops, installer or TLS policy changes. Completed cache files are
+retained, but changed source fingerprints can prevent reuse. SitePartition's
+actual first aggregation still scans all positive-site visits before the
+patient cap; this patch does not claim to optimize that SQL Server operation.
+
 ## JDBC probe revision 2 (2026-10-26)
 
 The initial SELECT used Statement.setMaxRows(2). In the pinned Microsoft JDBC

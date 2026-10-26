@@ -4,9 +4,46 @@
 # and stops its own retained workers through its existing failure/finally path.
 function New-FederatedDbWatchdog {
     param([string]$RunDirectory,[string]$RunId,[string[]]$Sites,[int]$TimeoutSeconds=180,
-          [int]$OperationTimeoutSeconds=75,[int]$StatusSeconds=10)
+          [int]$OperationTimeoutSeconds=75,[int]$StatusSeconds=10,[int]$SqlPreparationTimeoutSeconds=60)
     @{Root=$RunDirectory;RunId=$RunId;Sites=$Sites;Timeout=$TimeoutSeconds;Started=@{};Ready=@{};
-      OperationTimeout=$OperationTimeoutSeconds;StatusSeconds=$StatusSeconds;LastStatus=@{};Phase=@{}}
+      OperationTimeout=$OperationTimeoutSeconds;StatusSeconds=$StatusSeconds;LastStatus=@{};Phase=@{};
+      SqlPreparationTimeout=$SqlPreparationTimeoutSeconds;SqlPreparation=@{};SqlPreparationStatus=@{}}
+}
+
+function Update-FederatedSqlPreparationWatchdog($Watchdog,$Worker,[string]$Site,[DateTime]$Now) {
+    $key=[string]$Worker.Role+':'+$Site
+    $path=Join-Path $Watchdog.Root ('extraction/'+$Site+'/sql-prepare-state.json')
+    $detail=$null
+    try { $detail=Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json } catch { }
+    if($null -ne $detail) {
+        if($detail.runId -cne $Watchdog.RunId -or $detail.site -cne $Site -or $detail.pid -ne $Worker.Process.Id) {
+            throw "Invalid SQL preparation marker identity for site_id=$Site."
+        }
+        if($detail.status -notin @('started','completed','failed') -or -not $detail.id -or -not $detail.startedUtc) {
+            throw "Invalid SQL preparation state for site_id=$Site."
+        }
+        $Watchdog.SqlPreparation[$key]=$detail
+    }
+    # Retain the last complete snapshot if a concurrent write is incomplete.
+    if(-not $Watchdog.SqlPreparation.ContainsKey($key)){return}
+    $detail=$Watchdog.SqlPreparation[$key]
+    if($detail.status -ne 'started'){return}
+    $elapsed=[Math]::Max(0,($Now-(ConvertTo-FederatedUtc $detail.startedUtc)).TotalSeconds)
+    if(-not $Watchdog.SqlPreparationStatus.ContainsKey($key) -or
+        ($Now-$Watchdog.SqlPreparationStatus[$key]).TotalSeconds -ge $Watchdog.StatusSeconds) {
+        $line='[{0}] Local SQL preparation: site_id={1}; {2}; wait={3}s / {4}s limit (no DB query; deadline, not ETA)' -f
+            [DateTime]::Now.ToString('HH:mm:ss'),$Site,$detail.label,[Math]::Floor($elapsed),$Watchdog.SqlPreparationTimeout
+        Write-Host $line
+        try { [IO.File]::AppendAllText((Join-Path $Watchdog.Root 'sql-prepare-watchdog.log'),
+            $line+[Environment]::NewLine,(New-Object Text.UTF8Encoding($false))) } catch { }
+        $Watchdog.SqlPreparationStatus[$key]=$Now
+    }
+    if($elapsed -lt $Watchdog.SqlPreparationTimeout){return}
+    [IO.File]::WriteAllText((Join-Path $Watchdog.Root ('sql-prepare-timeout-'+$Site+'.json')),
+        (@{site=$Site;pid=$detail.pid;runId=$detail.runId;phase=$detail.label;operationId=$detail.id;
+            elapsedSeconds=[Math]::Floor($elapsed);limitSeconds=$Watchdog.SqlPreparationTimeout;state='timeout'} | ConvertTo-Json),
+        (New-Object Text.UTF8Encoding($false)))
+    throw "Local SQL preparation exceeded $($Watchdog.SqlPreparationTimeout)s for site_id=$Site; phase: $($detail.label). No automatic retry. See sql-prepare-timeout-$Site.json and shutdown-thread-$($Worker.Role).txt."
 }
 
 function Write-FederatedDbWatchdogLine($Watchdog,[string]$Text) {
@@ -25,6 +62,9 @@ function Update-FederatedDbWatchdog {
         $sites=if($worker.Role -eq 'baselines'){@($Watchdog.Sites)}elseif($worker.Role -cin $Watchdog.Sites){@($worker.Role)}else{@()}
         foreach($site in $sites) {
             $key=[string]$worker.Role+':'+[string]$site
+            # This phase precedes the first JDBC connection. It must be guarded
+            # even without a DB startup marker, or after an earlier DB is ready.
+            Update-FederatedSqlPreparationWatchdog $Watchdog $worker $site $Now
             if($Watchdog.Ready.ContainsKey($key)){continue}
             $directory=Join-Path $Watchdog.Root ('extraction/'+$site)
             $path=Join-Path $directory 'db-startup-start.json'

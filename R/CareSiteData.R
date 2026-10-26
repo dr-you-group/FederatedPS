@@ -62,7 +62,7 @@
     paste(sql, collapse = "\nUNION ALL\n")
 }
 
-.getCareSiteStudyData <- function(connection, schema, settings, careSiteId, patientLimit = 0L) {
+.getCareSiteStudyData <- function(connection, schema, settings, careSiteId, patientLimit = 0L, sqlPlan) {
     careSiteId <- .validateCareSiteId(careSiteId)
     patientLimit <- .validatePatientLimit(patientLimit)
     .validateCdmSchema(schema)
@@ -75,21 +75,16 @@
     }
     query <- function(sql, label = currentDetail, smallColumns = NULL) {
         .fpsDbOperation(paste(label, "query and fetch"), {
-            if (is.null(smallColumns)) DatabaseConnector::querySql(connection, sql, snakeCaseToCamelCase = TRUE)
+            if (is.null(smallColumns)) .fpsQuerySqlServer(connection, sql)
             else .fpsSmallSqlQuery(connection, sql, smallColumns)
         }, sql = sql, completed = currentStep)
     }
-    run <- function(sql, label = currentDetail) {
-        .fpsExecuteSql(connection, sql, label, completed = currentStep)
-    }
-    execute <- function(file, ...) {
-        path <- system.file("sql", "sql_server", file, package = "FederatedPs")
-        if (!nzchar(path)) stop("Missing SQL Server templates; reinstall FederatedPs")
-        sql <- paste(readLines(path, warn = FALSE), collapse = "\n")
-        sql <- .fpsDbOperation(paste("Rendering", file),
-            SqlRender::render(sql, cdm_database_schema = schema, care_site_id = careSiteId, ...),
-            completed = currentStep)
-        run(sql, file)
+    execute <- function(file) {
+        batch <- sqlPlan$batches[[file]]
+        if (is.null(batch)) stop("Missing prepared SQL: ", file)
+        .fpsProgress("extract", paste("Using prepared", file, "(", length(batch$statements), "statements)"),
+            currentStep, 10, "extraction steps (not time)")
+        .fpsExecuteSql(connection, batch$sql, file, completed = currentStep, statements = batch$statements)
     }
     if (!is.null(getOption("FederatedPs.smallQueryTimeoutSeconds"))) {
         step(0, "Connection self-check (SELECT 1 and session ID)")
@@ -132,24 +127,8 @@
         data.frame(table = table, counts)
     }))
     specific <- settings$scenario == "studySpecific"
-    ingredients <- list("1" = settings$targetIngredients, "0" = settings$comparatorIngredients)
-    atc <- list("1" = settings$targetAtc, "0" = settings$comparatorAtc)
-    if (specific) {
-        ingredients[["-1"]] <- unique(c(unlist(ingredients), settings$extraWashoutIngredients))
-        atc[["-1"]] <- unique(c(unlist(atc), settings$washoutAtc))
-    }
-    values <- function(groups, quote = FALSE) {
-        rows <- unlist(lapply(names(groups), function(arm) {
-            ids <- groups[[arm]]
-            if (!length(ids)) return(character())
-            ids <- if (quote) paste0("'", ids, "'") else format(ids, scientific = FALSE, trim = TRUE)
-            paste0("(", arm, ", ", ids, ")")
-        }), use.names = FALSE)
-        if (!length(rows)) return(if (quote) "(1, '')" else "(1, 0)")
-        paste(rows, collapse = ", ")
-    }
     step(4, "Resolving study concept definitions")
-    execute("StudyConcepts.sql", ingredient_rows = values(ingredients), atc_rows = values(atc, TRUE))
+    execute("StudyConcepts.sql")
     missing <- query(sprintf("SELECT r.ingredient_id FROM #fps_requested_ingredients r WHERE NOT EXISTS (
         SELECT 1 FROM %s.CONCEPT c WHERE c.concept_id = r.ingredient_id
         AND c.concept_class_id = 'Ingredient' AND c.vocabulary_id IN ('RxNorm', 'RxNorm Extension'))", schema))
@@ -166,33 +145,15 @@
         roots <- query(sprintf("SELECT concept_id FROM %s.CONCEPT WHERE domain_id = 'Condition'
             AND standard_concept = 'S' AND concept_id IN (%s)", schema, paste(settings$indicationConceptIds, collapse = ",")))
         if (!setequal(roots$conceptId, settings$indicationConceptIds)) stop("Missing indication concepts")
-        execute("SpecificStudy.sql", form_policy = settings$formPolicy,
-            indication_concept_ids = settings$indicationConceptIds,
-            record_type_concept_ids = settings$recordTypeConceptIds, min_age = settings$minAge,
-            prior_days = settings$priorObservationDays, indication_days = settings$indicationDays,
-            washout_days = settings$washoutDays)
+        execute("SpecificStudy.sql")
     } else execute("DefaultStudy.sql")
     if (patientLimit > 0L) {
         step(5, paste("Limiting exposure candidates to", patientLimit, "persons before CohortMethod"))
-        execute("LimitPatients.sql", patient_limit = patientLimit)
+        execute("LimitPatients.sql")
     }
-    step(6, "CohortMethod: preparing cohort SQL")
-    sql <- .fpsDbOperation("CohortMethod: rendering CreateOrCountCohorts.sql",
-        SqlRender::loadRenderTranslateSql("CreateOrCountCohorts.sql", packageName = "CohortMethod",
-        dbms = "sql server", cdm_database_schema = schema,
-        exposure_database_schema = "tempdb.dbo", exposure_table = "#fps_exposure",
-        target_id = 1, comparator_id = 2, first_only = TRUE,
-        remove_duplicate_subjects = "keep first, truncate to second",
-        washout_period = settings$priorObservationDays, min_age = if (specific) "" else settings$minAge,
-        restrict_to_common_period = FALSE, action = "CREATE"), completed = currentStep)
-    # YUHS table names are uppercase (also works on case-insensitive databases).
-    sql <- .fpsUppercaseCohortTables(sql, schema)
-    step(6, "CohortMethod: executing cohort creation SQL")
-    run(sql, "CohortMethod CreateOrCountCohorts.sql")
-    step(6, "CohortMethod: preparing cohort fetch SQL")
-    fetchSql <- .fpsDbOperation("CohortMethod: rendering GetCohorts.sql",
-        SqlRender::loadRenderTranslateSql("GetCohorts.sql", packageName = "CohortMethod",
-            dbms = "sql server", target_id = 1, cohortTable = "#cohort_person"), completed = currentStep)
+    step(6, "CohortMethod: executing prepared cohort creation SQL")
+    execute("CohortMethod CreateOrCountCohorts.sql")
+    fetchSql <- sqlPlan$batches[["CohortMethod GetCohorts.sql"]]$statements
     step(6, "CohortMethod: fetching cohort rows into R")
     cohorts <- query(fetchSql, "CohortMethod GetCohorts.sql")
     step(6, "CohortMethod: validating cohort rows in R")
@@ -204,15 +165,14 @@
     message("care_site_id ", careSiteId, ": target = ", counts[1], ", comparator = ", counts[2])
     if (any(counts == 0)) stop("Both treatment groups are required; study criteria were not relaxed")
     step(7, "Covariates.sql: extracting site-linked clinical features")
-    execute("Covariates.sql", clinical_sql = .careSiteClinicalSql(schema, settings))
+    execute("Covariates.sql")
     data <- Andromeda::andromeda()
     complete <- FALSE
     on.exit(if (!complete) Andromeda::close(data), add = TRUE)
     step(8, "Transferring covariates to local Andromeda")
     transferSql <- "SELECT row_id, covariate_id, covariate_value FROM #fps_covariates"
     .fpsDbOperation("Transferring covariates into Andromeda",
-        DatabaseConnector::querySqlToAndromeda(connection, transferSql,
-            andromeda = data, andromedaTableName = "covariates", snakeCaseToCamelCase = TRUE),
+        .fpsCopySqlServerToAndromeda(connection, transferSql, data, "covariates"),
         sql = transferSql, completed = currentStep)
     step(9, "Transferring feature metadata")
     metadataSql <- sprintf("SELECT DISTINCT f.covariate_id,
@@ -222,8 +182,7 @@
              ELSE COALESCE(c.concept_name, 'Unknown concept') END AS covariate_name
         FROM #fps_covariates f LEFT JOIN %s.CONCEPT c ON c.concept_id = f.covariate_id / 1000", schema)
     .fpsDbOperation("Transferring feature metadata into Andromeda",
-        DatabaseConnector::querySqlToAndromeda(connection, metadataSql,
-            andromeda = data, andromedaTableName = "covariateRef", snakeCaseToCamelCase = TRUE),
+        .fpsCopySqlServerToAndromeda(connection, metadataSql, data, "covariateRef"),
         sql = metadataSql, completed = currentStep)
     data$analysisRef <- .careSiteAnalysis(settings)
     data$cohorts <- cohorts

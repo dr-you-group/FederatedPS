@@ -47,10 +47,28 @@
     invisible(result)
 }
 
-.fpsExecuteSql <- function(connection, sql, label, completed) {
+.fpsJdbcExecutePrepared <- function(jConnection, sql, jcall = rJava::.jcall) {
+    statement <- jcall(jConnection, "Ljava/sql/Statement;", "createStatement")
+    completed <- FALSE
+    on.exit({
+        if (completed) jcall(statement, "V", "close") else try(jcall(statement, "V", "close"), silent = TRUE)
+    })
+    # This is one already-split statement. DatabaseConnector's dbExecute would
+    # call SqlRender::splitSql again inside the live JDBC process.
+    result <- jcall(statement, "J", "executeLargeUpdate", as.character(sql))
+    completed <- TRUE
+    result
+}
+
+.fpsExecuteSql <- function(connection, sql, label, completed, statements = NULL) {
     if (!DBI::dbIsValid(connection)) stop("Connection is closed")
-    .fpsRunSqlStatements(SqlRender::splitSql(sql), label, completed,
-        execute = function(statement) DBI::dbExecute(connection, statement),
+    if (is.null(statements)) statements <- SqlRender::splitSql(sql)
+    .fpsRunSqlStatements(statements, label, completed,
+        execute = function(statement) {
+            if (inherits(connection, "DatabaseConnectorJdbcConnection"))
+                .fpsJdbcExecutePrepared(connection@jConnection, statement)
+            else DBI::dbExecute(connection, statement)
+        },
         finish = function() {
             if (inherits(connection, "DatabaseConnectorJdbcConnection") &&
                 !rJava::.jcall(connection@jConnection, "Z", "getAutoCommit"))
