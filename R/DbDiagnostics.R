@@ -1,6 +1,6 @@
 # Diagnostics remain local to the role. They never enter the federated exchange.
 # Callers outside the Windows launcher keep SQL logging and short-query guards off.
-.fpsDbRuntimeRevision <- "jdbc-probe-2"
+.fpsDbRuntimeRevision <- "jdbc-probe-3"
 
 .fpsDiagnosticWrite <- function(name, text, append = FALSE) {
     directory <- getOption("FederatedPs.sqlDiagnosticsDirectory")
@@ -76,21 +76,46 @@
     invisible(NULL)
 }
 
-# Standard JDBC interfaces only. This intentionally reads at most two small
-# rows, sufficient to validate SELECT 1 / @@SPID and uniqueness of CARE_SITE.
-# Network timeout is scoped to this operation and restored before bulk work.
+# Only SELECT 1 / @@SPID and SELECT TOP (2) CARE_SITE use this path. Buffer the
+# complete, bounded response before exposing rows. Bulk SELECTs remain adaptive.
+# Explicitly consume EOF and the statement's terminal result: close() is not a
+# substitute for reading a response and may silently discard late SQL errors.
 .fpsJdbcSmallQuery <- function(jConnection, sql, columns, timeout,
                                jcall = rJava::.jcall,
-                               nullExecutor = rJava::.jnull("java/util/concurrent/Executor")) {
+                               nullExecutor = rJava::.jnull("java/util/concurrent/Executor"),
+                               jcast = rJava::.jcast) {
     timeout <- .fpsSmallQueryTimeout(timeout)
     label <- if (identical(names(columns), c("ok", "sessionId"))) "Connection self-check" else "CARE_SITE lookup"
-    call <- function(object, type, method, ...) {
-        phase <- paste0(label, ": JDBC ", method,
+    statement <- result <- NULL
+    fetched <- 0L
+    exhausted <- FALSE
+    firstFailure <- NULL
+    journal <- function(phase, status) {
+        # No SQL, connection URL, credentials or returned cell values. Record
+        # the first failure BEFORE on.exit cleanup can block or change phase.
+        .fpsDiagnosticWrite("probe-events.tsv", paste(
+            format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"), Sys.getpid(),
+            phase, status, fetched, exhausted,
+            if (is.null(firstFailure)) "" else firstFailure, sep = "\t"), append = TRUE)
+    }
+    call <- function(object, type, method, ..., resource = "Connection") {
+        phase <- paste0(label, ": JDBC ", resource, ".", method,
             if (identical(method, "close")) " (resource cleanup)" else "")
         .fpsDbStartupState(phase)
-        .fpsDbOperation(phase, jcall(object, type, method, ...), completed = 0)
+        journal(phase, "started")
+        value <- tryCatch(.fpsDbOperation(phase, jcall(object, type, method, ...), completed = 0),
+            error = function(e) {
+                if (is.null(firstFailure)) {
+                    firstFailure <<- phase
+                    journal(phase, "first-failure")
+                    message("JDBC probe FIRST FAILURE: ", phase, "\n", conditionMessage(e))
+                    flush(stderr())
+                } else journal(phase, "cleanup-failure")
+                stop(e)
+            })
+        journal(phase, "completed")
+        value
     }
-    statement <- result <- NULL
     originalNetworkTimeout <- call(jConnection, "I", "getNetworkTimeout")
     changedNetworkTimeout <- FALSE
     completed <- FALSE
@@ -99,36 +124,49 @@
         cleanup <- function(expr) tryCatch(force(expr), error = function(e) {
             if (is.null(cleanupError)) cleanupError <<- e
         })
-        if (!is.null(result)) cleanup(call(result, "V", "close"))
-        if (!is.null(statement)) cleanup(call(statement, "V", "close"))
+        if (!is.null(result)) cleanup(call(result, "V", "close", resource = "ResultSet"))
+        if (!is.null(statement)) cleanup(call(statement, "V", "close", resource = "Statement"))
         if (changedNetworkTimeout)
             cleanup(call(jConnection, "V", "setNetworkTimeout", nullExecutor,
                           as.integer(originalNetworkTimeout)))
-        # Never leave a short socket timeout on a healthy connection used for
-        # bulk extraction. On failure preserve the original query exception.
+        # The pinned driver's close() can suppress I/O errors. A closed
+        # connection is never a successful startup check.
+        if (completed && is.null(cleanupError))
+            cleanup(if (isTRUE(call(jConnection, "Z", "isClosed"))) stop("JDBC connection closed during probe cleanup"))
         if (completed && !is.null(cleanupError)) stop(cleanupError)
     })
     call(jConnection, "V", "setNetworkTimeout", nullExecutor, as.integer((timeout + 15L) * 1000L))
     changedNetworkTimeout <- TRUE
-    statement <- call(jConnection, "Ljava/sql/Statement;", "createStatement")
-    call(statement, "V", "setQueryTimeout", timeout)
-    # Do NOT call setMaxRows here. SQL Server JDBC implements it by sending
-    # SET ROWCOUNT before the actual SELECT, via an uninterruptible connection
-    # command (9.2.0). Bound CARE_SITE in SQL with TOP (2) instead. These probes
-    # must not introduce a hidden command or change session row-count state.
-    result <- call(statement, "Ljava/sql/ResultSet;", "executeQuery", sql)
+    # Microsoft TYPE_SS_DIRECT_FORWARD_ONLY = 2003, CONCUR_READ_ONLY = 1007.
+    # Explicit direct mode avoids a server cursor even on a cursor connection.
+    statement <- call(jConnection, "Ljava/sql/Statement;", "createStatement", 2003L, 1007L)
+    statement <- jcast(statement, "com/microsoft/sqlserver/jdbc/SQLServerStatement")
+    call(statement, "V", "setResponseBuffering", "full", resource = "Statement")
+    call(statement, "V", "setQueryTimeout", timeout, resource = "Statement")
+    # Never setMaxRows: the pinned driver emits a hidden SET ROWCOUNT command.
+    result <- call(statement, "Ljava/sql/ResultSet;", "executeQuery", sql, resource = "Statement")
     values <- lapply(columns, function(type) if (type == "integer") integer() else character())
-    while (isTRUE(call(result, "Z", "next"))) {
+    while (isTRUE(call(result, "Z", "next", resource = "ResultSet"))) {
+        fetched <- fetched + 1L
+        if (fetched > 2L) stop("Small JDBC probe returned more than two rows; expected server-bounded SQL")
         for (i in seq_along(columns)) {
-            value <- if (columns[[i]] == "integer") call(result, "I", "getInt", as.integer(i)) else
-                call(result, "S", "getString", as.integer(i))
-            if (isTRUE(call(result, "Z", "wasNull"))) value <- if (columns[[i]] == "integer") NA_integer_ else NA_character_
+            value <- if (columns[[i]] == "integer")
+                call(result, "I", "getInt", as.integer(i), resource = "ResultSet") else
+                call(result, "S", "getString", as.integer(i), resource = "ResultSet")
+            if (isTRUE(call(result, "Z", "wasNull", resource = "ResultSet")))
+                value <- if (columns[[i]] == "integer") NA_integer_ else NA_character_
             values[[i]] <- c(values[[i]], value)
         }
-        # The caller's SELECT TOP (2) bounds CARE_SITE at the server. SELECT 1
-        # has one row. Keep a client-side guard too, for unusual drivers.
-        if (length(values[[1L]]) >= 2L) break
+        # Even when TOP (2) returned two rows, read next() == FALSE. Do not
+        # leave the result's completion/error tokens for ResultSet.close().
     }
+    exhausted <- TRUE
+    journal(paste0(label, ": response rows exhausted"), "completed")
+    # JDBC next() == FALSE ends the rowset, not necessarily the entire batch.
+    # getMoreResults processes its completion/error tokens before cleanup.
+    if (isTRUE(call(statement, "Z", "getMoreResults", resource = "Statement")) ||
+        call(statement, "I", "getUpdateCount", resource = "Statement") != -1L)
+        stop("Unexpected additional result from small JDBC probe")
     answer <- as.data.frame(values, stringsAsFactors = FALSE)
     completed <- TRUE
     answer

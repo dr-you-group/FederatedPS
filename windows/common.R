@@ -8,7 +8,7 @@ fp_check_names <- function(run_id, sites) {
 
 fp_verify_db_runtime_revision <- function(installedRevision = tryCatch(
         utils::getFromNamespace(".fpsDbRuntimeRevision", "FederatedPs"), error = function(e) NULL)) {
-    if (!identical(installedRevision, "jdbc-probe-2"))
+    if (!identical(installedRevision, "jdbc-probe-3"))
         stop("Installed FederatedPs lacks the JDBC probe fix. Run 10_UPDATE_PACKAGE.ps1 ",
              "(or windows/Update-FederatedPs.ps1), then start a new R process.")
     invisible(TRUE)
@@ -55,7 +55,7 @@ fp_verify_runtime <- function(project) {
         stop("SQL Server JDBC missing; transfer the new payload and run Install-Offline.ps1")
     rJava::.jinit()
     if (!"ppi" %in% FederatedPs::listStudies()$study) stop("Study metadata missing")
-    cat("PASS: offline R, block Cyclops, FederatedPs, JVM and JDBC [jdbc-probe-2; sql-plan-4]\n")
+    cat("PASS: offline R, block Cyclops, FederatedPs, JVM and JDBC [jdbc-probe-3; sql-plan-4]\n")
     invisible(TRUE)
 }
 

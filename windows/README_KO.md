@@ -1,3 +1,6 @@
+> Fresh 번들 RUN 기본값은 site_id 1/2/3 각각 2명입니다.
+> JDBC close 대기 수정과 연결 검사: [JDBC_PROBE_CLEANUP_KO.md](JDBC_PROBE_CLEANUP_KO.md).
+
 # 전처리 우선 실행기 핫픽스 (0.0.10, 2026-10-26)
 
 기본 전처리를 단일 R 프로세스로 변경했습니다. 모든 기관 전처리 후 모델을 실행합니다.

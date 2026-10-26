@@ -159,7 +159,7 @@ function Get-RunDiagnosticFiles($Context) {
             $diagnostics=Join-Path $Context.Root (Join-Path $role $folder)
             if (Test-Path -LiteralPath $diagnostics -PathType Container) {
                 foreach ($file in @(Get-ChildItem -LiteralPath $diagnostics -File)) {
-                    if ($file.Extension -eq '.sql' -or $file.Name -in @('operations.tsv','connection.tsv','errorReportSql.txt')) {
+                    if ($file.Extension -eq '.sql' -or $file.Name -in @('operations.tsv','connection.tsv','probe-events.tsv','errorReportSql.txt')) {
                         Join-Path (Join-Path $role $folder) $file.Name
                     }
                 }

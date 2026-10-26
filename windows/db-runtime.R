@@ -106,10 +106,12 @@ fp_prepare_db_connection <- function(details, config) {
     if (!is.character(settings) || length(settings) != 1L || is.na(settings))
         stop("Expected SQL Server JDBC settings as a string")
     parts <- strsplit(settings, ";", fixed = TRUE)[[1L]]
-    # Only override timeout policy; preserve database, TLS and other settings.
+    # Direct/adaptive is the bulk default; only the two-row probe statement
+    # overrides buffering to full. Preserve database, TLS and other settings.
     parts <- parts[nzchar(trimws(parts)) & !grepl(
-        "^\\s*(loginTimeout|queryTimeout|cancelQueryTimeout|socketTimeout)\\s*=", parts, ignore.case = TRUE)]
-    details$extraSettings <- paste(c(parts, "loginTimeout=30", "cancelQueryTimeout=10",
+        "^\\s*(loginTimeout|queryTimeout|cancelQueryTimeout|socketTimeout|selectMethod|responseBuffering)\\s*=", parts, ignore.case = TRUE)]
+    details$extraSettings <- paste(c(parts, "selectMethod=direct", "responseBuffering=adaptive",
+        "loginTimeout=30", "cancelQueryTimeout=10",
         paste0("queryTimeout=", fp_timeout_value(config, "dbQueryTimeout", 7200)),
         paste0("socketTimeout=", fp_socket_timeout_millis(
             fp_timeout_value(config, "smallQueryTimeout", 60)))), collapse = ";")

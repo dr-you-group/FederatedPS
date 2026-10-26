@@ -344,3 +344,14 @@ Live progress update, FederatedPs 0.0.6 (2026-10-25):
 - Stage percentages are completed extraction milestones, not time-weighted SQL
   progress. Coordinate ETA covers only the current sweep; overall ETA remains
   unknown. A live PID or quiet log does not prove SQL is advancing or deadlocked.
+
+## 2026-10-26 JDBC probe revision 3
+
+Bounded startup statements now use direct/full buffering, consume EOF and terminal results before cleanup, identify ResultSet vs Statement close, and persist the first JDBC failure before cleanup. Bulk fetching remains adaptive. RUN accepts per-site PatientLimits and defaults to 2/2/2 for the requested smoke run.
+
+Validation: production R/rJava against the pinned Microsoft 9.2.0 JAR and a loopback TDS fault server (no clinical DB): 0/1/2 rows including Unicode and NULL, split response packets, late SQL error, missing terminal response. Legacy swallowed late-error behavior reproduced; revised code rejects it. Subsequent statements retain adaptive buffering; no hidden SET ROWCOUNT or cursor RPC sent. Unit fixtures cover resource cleanup, error precedence, deadline/TLS policy, runtime revision gates and diagnostic export. Windows PowerShell scripts parsed with PowerShell 7.4 and launcher/monitor regressions exercised on Linux. Live Windows/HIWARE/YUHS execution remains unverified.
+
+To reproduce the wire test, set `FPS_TEST_R` to the R executable (accepts --file) and `FPS_TEST_JDBC` to the pinned mssql-jdbc-9.2.0.jre8.jar, configure R/rJava, then run `python3 windows/tests/test-jdbc-probe-response-wire.py` from the repository. The server binds only 127.0.0.1; it uses synthetic results and fixture credentials.
+
+
+Fresh integrity policy now reports local script/package-source edits instead of treating them as damaged installation payloads. `00_VERIFY.ps1 -StrictSource` retains pristine-source checks. Immutable installers, dependency archives/locks, runtime-lock, provenance and git bundle still fail on mismatches. RUN -UpdatePackage applies package edits before preflight/analysis and stops if update fails. PowerShell fixtures cover local R/SQL/RUN edits and deletion, unchanged manifest, immutable tampering, required files, unsafe paths and update-order/failure gates.

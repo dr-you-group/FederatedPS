@@ -25,6 +25,8 @@ make_java <- function(rows, fail = "", failRestore = FALSE) {
         }
         if (method == "createStatement") return("statement")
         if (method == "executeQuery") return("result")
+        if (method == "getUpdateCount") return(-1L)
+        if (method == "getMoreResults" || method == "isClosed") return(FALSE)
         if (method == "next") { state$row <- state$row + 1L; return(state$row <= nrow(rows)) }
         if (method %in% c("getInt", "getString")) {
             value <- rows[state$row, args[[1]]]
@@ -40,36 +42,39 @@ columns <- c(careSiteId = "integer", careSiteName = "character", careSiteSourceV
 rows <- data.frame(id = 2L, name = "Synthetic Hospital", source = NA_character_)
 java <- make_java(rows)
 sql <- "SELECT TOP (2) care_site_id, care_site_name, care_site_source_value FROM CDM.CARE_SITE WHERE care_site_id = 2"
-got <- .fpsJdbcSmallQuery("connection", sql, columns, 60, java$call, "null-executor")
+got <- .fpsJdbcSmallQuery("connection", sql, columns, 60, java$call, "null-executor", function(object, ...) object)
 stopifnot(identical(names(got), names(columns)), got$careSiteId == 2L,
           got$careSiteName == "Synthetic Hospital", is.na(got$careSiteSourceValue),
           java$network == 180000L)
 methods <- vapply(java$calls, `[[`, "", "method")
-stopifnot(identical(methods[1:5], c("getNetworkTimeout", "setNetworkTimeout", "createStatement",
-                                  "setQueryTimeout", "executeQuery")),
+stopifnot(identical(methods[1:6], c("getNetworkTimeout", "setNetworkTimeout", "createStatement",
+                                  "setResponseBuffering", "setQueryTimeout", "executeQuery")),
           !"setMaxRows" %in% methods)
-stopifnot(java$calls[[2]]$args[[2]] == 75000L, java$calls[[4]]$args[[1]] == 60L,
-          java$calls[[5]]$args[[1]] == sql)
-stopifnot(identical(tail(methods, 3), c("close", "close", "setNetworkTimeout")))
+stopifnot(java$calls[[2]]$args[[2]] == 75000L, identical(java$calls[[3]]$args, list(2003L,1007L)),
+          java$calls[[4]]$args[[1]] == "full", java$calls[[5]]$args[[1]] == 60L,
+          java$calls[[6]]$args[[1]] == sql)
+stopifnot(identical(tail(methods, 4), c("close", "close", "setNetworkTimeout", "isClosed")))
 
-for (fail in c("createStatement", "setQueryTimeout", "executeQuery", "next", "getString")) {
+for (fail in c("createStatement", "setResponseBuffering", "setQueryTimeout", "executeQuery", "next", "getString", "getMoreResults")) {
     java <- make_java(rows, fail)
-    expect_error(.fpsJdbcSmallQuery("connection", sql, columns, 60, java$call, "null-executor"), fail)
+    expect_error(.fpsJdbcSmallQuery("connection", sql, columns, 60, java$call, "null-executor", function(object, ...) object), fail)
     stopifnot(java$network == 180000L)
     if (fail != "createStatement")
         stopifnot(any(vapply(java$calls, function(x) x$object == "statement" && x$method == "close", TRUE)))
-    if (fail %in% c("next", "getString"))
+    if (fail %in% c("next", "getString", "getMoreResults"))
         stopifnot(any(vapply(java$calls, function(x) x$object == "result" && x$method == "close", TRUE)))
 }
-for (count in c(0, 2, 4)) {
+for (count in c(0, 2)) {
     java <- make_java(rows[rep(1, count), , drop = FALSE])
-    got <- .fpsJdbcSmallQuery("connection", sql, columns, 1, java$call, "null-executor")
-    stopifnot(nrow(got) == min(2, count), java$network == 180000L)
+    got <- .fpsJdbcSmallQuery("connection", sql, columns, 1, java$call, "null-executor", function(object, ...) object)
+    stopifnot(nrow(got) == count, java$network == 180000L, java$row == count + 1L)
 }
+java <- make_java(rows[rep(1, 4),,drop=FALSE])
+invisible(expect_error(.fpsJdbcSmallQuery("connection", sql, columns, 60, java$call, "null-executor", function(object, ...) object), "more than two"))
 java <- make_java(rows, failRestore = TRUE)
-invisible(expect_error(.fpsJdbcSmallQuery("connection", sql, columns, 60, java$call, "null-executor"), "restore failure"))
+invisible(expect_error(.fpsJdbcSmallQuery("connection", sql, columns, 60, java$call, "null-executor", function(object, ...) object), "restore failure"))
 java <- make_java(rows, fail = "executeQuery", failRestore = TRUE)
-invisible(expect_error(.fpsJdbcSmallQuery("connection", sql, columns, 60, java$call, "null-executor"), "executeQuery"))
+invisible(expect_error(.fpsJdbcSmallQuery("connection", sql, columns, 60, java$call, "null-executor", function(object, ...) object), "executeQuery"))
 
 # Only the small-query JDBC boundary gets the probe error classification.
 methods::setClass("DatabaseConnectorJdbcConnection", slots = c(jConnection = "ANY"))
@@ -97,9 +102,9 @@ options(FederatedPs.smallQueryTimeoutSeconds = NULL)
 phases <- character()
 options(FederatedPs.progress=NULL,FederatedPs.dbStartupObserver=function(phase,ready) phases <<- c(phases,phase))
 java <- make_java(rows)
-invisible(.fpsJdbcSmallQuery("connection",sql,columns,60,java$call,"null-executor"))
-stopifnot(any(grepl("JDBC executeQuery",phases)),any(grepl("JDBC next",phases)),
-    any(grepl("resource cleanup",phases)),grepl("setNetworkTimeout",tail(phases,1)),
+invisible(.fpsJdbcSmallQuery("connection",sql,columns,60,java$call,"null-executor", function(object, ...) object))
+stopifnot(any(grepl("JDBC Statement.executeQuery",phases)),any(grepl("JDBC ResultSet.next",phases)),
+    any(grepl("resource cleanup",phases)),grepl("isClosed",tail(phases,1)),
     !any(grepl("Synthetic Hospital|SELECT|CDM.CARE_SITE",phases)))
 options(FederatedPs.dbStartupObserver=NULL)
 
@@ -134,4 +139,18 @@ stopifnot(identical(.fpsUppercaseCohortTables(aliased, "CDM.CDM"),
     "INNER JOIN CDM.CDM.PERSON AS p ON cohorts.subject_id = p.person_id"))
 options(FederatedPs.progress = NULL)
 unlink(directory, recursive = TRUE)
-cat("PASS: no hidden SET ROWCOUNT; scoped/clinical socket deadlines; fetch bounds; cleanup; probe errors; SQL diagnostics\n")
+# A late server error must be seen by getMoreResults, not discarded by close.
+logDir <- tempfile(); dir.create(logDir)
+options(FederatedPs.sqlDiagnosticsDirectory=logDir)
+java <- make_java(rows, fail="getMoreResults")
+error <- suppressMessages(expect_error(.fpsJdbcSmallQuery("connection",sql,columns,60,java$call,
+    "null-executor",function(object,...) object),"getMoreResults"))
+journal <- readLines(file.path(logDir,"probe-events.tsv"))
+stopifnot(any(grepl("first-failure",journal)), any(grepl("Statement.getMoreResults",journal)),
+    any(grepl("ResultSet.close",journal)), any(grepl("Statement.close",journal)),
+    !any(grepl("Synthetic Hospital|CDM.CARE_SITE",journal)))
+first <- which(grepl("first-failure",journal))
+stopifnot(first < which(grepl("ResultSet.close.*started",journal))[1])
+unlink(logDir,recursive=TRUE)
+options(FederatedPs.sqlDiagnosticsDirectory=NULL)
+cat("PASS: full bounded response, EOF/terminal errors, explicit cleanup phases, first-failure journal; no hidden SET ROWCOUNT; scoped/clinical socket deadlines; fetch bounds; cleanup; probe errors; SQL diagnostics\n")

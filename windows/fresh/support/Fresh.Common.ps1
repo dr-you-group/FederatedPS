@@ -32,30 +32,56 @@ function Get-FreshPayloadPath([string]$Root,[string]$Relative) {
     if (-not $path.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)) { throw 'Payload path leaves bundle.' }
     $path
 }
-function Test-FreshManifest([string]$Root) {
+# Source/scripts are intentionally editable after transfer. Keep the original
+# manifest as provenance; never rewrite it to bless changed installer bytes.
+function Test-FreshEditablePath([string]$Relative) {
+    $path=$Relative.Replace('\','/')
+    if($path -eq 'FederatedPS/windows/runtime-lock.json'){return $false}
+    if($path -match '^FederatedPS/(DESCRIPTION|NAMESPACE|LICENSE|[.]Rbuildignore)$'){return $true}
+    if($path -match '^FederatedPS/' -and $path -match '[.](R|ps1|sql|md|json|ya?ml|csv|tsv|Rd|txt|example)$'){return $true}
+    if($path -match '^[^/]+[.](ps1|md)$'){return $true}
+    if($path -match '^support/[^/]+[.](R|ps1)$'){return $true}
+    if($path -match '^diagnostics/[^/]+[.]sql$'){return $true}
+    return $false
+}
+function Test-FreshManifest([string]$Root,[switch]$StrictSource) {
     $manifest = Get-Content -LiteralPath (Join-Path $Root 'BUNDLE_MANIFEST.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($manifest.format -ne 'FederatedPS-fresh-v1' -or -not $manifest.files.Count) { throw 'Invalid fresh-install manifest.' }
     $seen = @{}
+    $edits=New-Object 'System.Collections.Generic.List[string]'
     foreach ($entry in $manifest.files) {
         if ($seen.ContainsKey([string]$entry.path) -or $entry.sha256 -notmatch '^[a-fA-F0-9]{64}$') { throw 'Invalid manifest entry.' }
         $seen[[string]$entry.path] = $true
         $path = Get-FreshPayloadPath $Root $entry.path
-        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing bundled file: $($entry.path)" }
-        if ((Get-Item -LiteralPath $path -Force).Length -ne [long]$entry.bytes -or
-            (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $entry.sha256) { throw "Integrity failure: $($entry.path)" }
+        $exists=Test-Path -LiteralPath $path -PathType Leaf
+        $same=$exists -and (Get-Item -LiteralPath $path -Force).Length -eq [long]$entry.bytes -and
+            (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -eq $entry.sha256
+        if($same){continue}
+        if(-not $StrictSource -and (Test-FreshEditablePath $entry.path)) {
+            $edits.Add([string]$entry.path)
+            continue
+        }
+        if(-not $exists){throw "Missing bundled file: $($entry.path)"}
+        throw "Integrity failure: $($entry.path)"
+
     }
     foreach ($relative in @('installers/R-4.6.1-win.exe','installers/rtools45-6768-6492.exe',
         'installers/Temurin17-JDK-windows-x64.msi','installers/RStudio-2026.10.0-233.exe',
         'packages/PACKAGE_LOCK.dcf','packages/PACKAGE_LOCK.json','FederatedPS/DESCRIPTION',
         'FederatedPS/windows/runtime-lock.json','RUN.ps1')) {
         if (-not $seen.ContainsKey($relative)) { throw "Required payload is not in manifest: $relative" }
+        if(-not (Test-Path -LiteralPath (Get-FreshPayloadPath $Root $relative) -PathType Leaf)){throw "Missing required payload: $relative"}
     }
     $lock = Get-Content -LiteralPath (Join-Path $Root 'packages/PACKAGE_LOCK.json') -Raw | ConvertFrom-Json
     foreach ($package in $lock.packages) {
         $key = 'packages/' + [string]$package.file
         if (-not $seen.ContainsKey($key)) { throw "Dependency archive absent from manifest: $key" }
     }
-    Write-Host "PASS: $($manifest.files.Count) files and $($lock.packages.Count) Windows package archives verified." -ForegroundColor Green
+    if($edits.Count) {
+        Write-Host ("LOCAL EDIT accepted ({0} source/script files): {1}" -f $edits.Count,($edits -join ', ')) -ForegroundColor Yellow
+        Write-Host 'R/package changes require 10_UPDATE_PACKAGE.ps1 or RUN.ps1 -UpdatePackage. Use 00_VERIFY.ps1 -StrictSource to compare every source file with the release.'
+    }
+    Write-Host "PASS: immutable payload and $($lock.packages.Count) Windows package archives verified; $($edits.Count) local source edits allowed." -ForegroundColor Green
 }
 function Invoke-FreshInstaller([string]$Executable,[string]$InstallerArguments,[string]$Label,[string]$LogFile) {
     Write-Host "Installing $Label from local payload..."

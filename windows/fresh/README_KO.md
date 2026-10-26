@@ -50,7 +50,7 @@ SETUP은 아래 단계를 순서대로 실행합니다. 하나라도 실패하�
 
 | 순서 | 스크립트 | 작업 |
 |---|---|---|
-| 00 | `00_VERIFY.ps1` | 모든 반입 파일 SHA-256·크기, 패키지 목록 검사 |
+| 00 | `00_VERIFY.ps1` | 설치/의존 파일 SHA-256·크기와 패키지 목록 검사, 로컬 소스 변경 표시 |
 | 01 | `01_INSTALL_RUNTIME.ps1` | R 4.6.1, Rtools45, Temurin JDK 17, RStudio Desktop 설치 |
 | 02 | `02_INSTALL_PACKAGES.ps1` | Windows 바이너리 의존 패키지 설치, 고정 Cyclops 소스 빌드, FederatedPs/JDBC 설치 |
 | 03 | `03_VERIFY_RUNTIME.ps1` | R·패키지·proximal CCD 확인 및 DB 없는 SQL 렌더링 검사 |
@@ -120,14 +120,14 @@ RUN은 60초 제한의 독립 SQL 렌더링 점검이 성공한 뒤 아래 옵�
 .\05_RUN_YUHS.ps1 -Test $false `
     -Study ppi -Scenario default `
     -Methods local-only,pooled `
-    -PatientLimits @{1=200; 2=100; 3=300} `
+    -PatientLimits @{1=2; 2=2; 3=2} `
     -ExtractionWorkers 1 `
     -StatusSeconds 10
 ```
 
 전처리 순서: site_id 1 → 2 → 3 → 모든 기관 입력 검증 → local-only → pooled.
 한 기관이 전처리 중이면 다음 기관이 queued로 표시됩니다. federated는 실행하지 않습니다.
-실제 분석 전 환자 제한을 바꾸려면 RUN.ps1의 PatientLimits를 편집하거나 05를 직접 실행하십시오.
+RUN 기본값은 기관별 2명입니다. 파일을 편집하지 않고 `./RUN.ps1 -PatientLimits @{1=200;2=100;3=300}`으로 변경할 수 있습니다. 2명은 실행 점검용이며 연구 조건 적용 후 한 군이 비어 분석이 중단될 수 있습니다.
 0은 제한 없음이고, 2 이상의 값은 기관별 상한입니다. 후속 기준 적용 후 최종 환자는 더 적을 수 있습니다.
 default는 동일한 환자 선택 규칙으로 방문 복사 전에 상한을 적용합니다. 초기 약제 후보 검색은 더 많은 행을 읽을 수 있습니다.
 studySpecific은 기존처럼 적격성 판단 뒤 CohortMethod 전에 상한을 적용합니다.
@@ -151,7 +151,7 @@ SitePartition/CohortMethod 중간 단계만 끝난 상태는 재개 체크포인
 ```
 
 R, Rtools, Java, Cyclops를 다시 설치할 필요가 없습니다. 실행 전 확인에
-`[jdbc-probe-2; sql-plan-4]`가 표시되어야 합니다. 같은 0.0.10이라도 설치된 패키지가 구버전이면
+`[jdbc-probe-3; sql-plan-4]`가 표시되어야 합니다. 같은 0.0.10이라도 설치된 패키지가 구버전이면
 분석을 시작하지 않고 업데이트 명령을 안내합니다.
 
 0단계는 `db-startup-watchdog.log`에 기관별 현재 호출과 경과/제한 시간을 기록합니다.
@@ -182,7 +182,7 @@ CohortMethod의 원래 템플릿과 조건, 실행 순서, 최종 commit, 분할
 
 최신 `sql-plan-4`는 실제 SQL 실행량도 줄입니다. 연구 약제 매핑 → 해당 기관의 노출 후보
 → 다른 양수 기관 방문자 제외 → default의 기존 환자 상한 → 방문 복사 순서입니다.
-따라서 RUN 기본값은 방문 복사 전에 site_id 1/2/3을 각각 200/100/300명으로 제한합니다.
+따라서 RUN 기본값은 방문 복사 전에 site_id 1/2/3을 각각 2명으로 제한합니다.
 초기 후보 검색은 여전히 큰 테이블을 읽을 수 있습니다. studySpecific은 기존처럼
 적격성 판단 뒤에 상한을 적용합니다. 선택한 환자의 전체 관련 이력과 CohortMethod 조건을 유지합니다.
 
@@ -231,3 +231,36 @@ R installer는 CRAN 공식 MD5, Java MSI는 공급자 SHA-256과 대조했고 �
 [Rtools45](https://cran.r-project.org/bin/windows/Rtools/rtools45/rtools.html),
 [Temurin 17](https://github.com/adoptium/temurin17-binaries/releases),
 [RStudio 다운로드](https://docs.posit.co/ide/user/download.html).
+
+
+2026-10-26 `jdbc-probe-3`은 CARE_SITE/SELECT 1에만 direct/full 응답 처리를 적용합니다.
+2행이 반환되어도 EOF와 최종 SQL 응답을 확인한 다음 닫습니다. `ResultSet.close`와
+`Statement.close`를 구분하고 최초 오류를 정리 전에 stderr와 `probe-events.tsv`에 기록합니다.
+대량 추출은 adaptive 방식이며 SSL/환자 선정 규칙/시간 제한을 변경하지 않습니다.
+업데이트 후 `07_CHECK_DB.ps1`가 성공하면 `RUN.ps1`로 재실행하십시오.
+연결 검사 로그는 `FederatedPS\work\diagnostics\connection-*` 아래에 저장됩니다.
+자세한 설명: `FederatedPS/windows/JDBC_PROBE_CLEANUP_KO.md`.
+
+
+## 로컬 수정과 무결성 검사
+
+`RUN.ps1` 옵션, PowerShell 스크립트, FederatedPS R/SQL 소스는 수정 가능합니다.
+기본 검사는 이 변경을 `LOCAL EDIT accepted`로 알리고 계속합니다.
+설치 EXE/MSI, 의존 패키지 ZIP/lock, JDBC/Cyclops payload, git bundle,
+`SOURCE_INFO.json` 및 `FederatedPS/windows/runtime-lock.json`은 계속 엄격하게 검증합니다.
+`BUNDLE_MANIFEST.json`을 지우거나 다시 계산할 필요가 없습니다.
+
+```powershell
+# RUN 옵션 변경은 파일 편집 없이 가능
+.\RUN.ps1 -PatientLimits @{1=2;2=2;3=2}
+
+# R/SQL 패키지 소스를 수정했다면 설치된 R 패키지에 반영 후 실행
+.\RUN.ps1 -UpdatePackage
+
+# 배포 원본과 소스까지 일치하는지 확인하고 싶을 때
+.\00_VERIFY.ps1 -StrictSource
+```
+
+`-UpdatePackage`는 FederatedPs만 갱신하며, 실패하면 분석을 시작하지 않습니다.
+R/RStudio를 닫은 뒤 실행합니다. 일반 RUN은 설치된 패키지를 사용하므로,
+R/inst 소스 수정 후에는 이 옵션 또는 `10_UPDATE_PACKAGE.ps1`가 필요합니다.

@@ -1,8 +1,8 @@
 # Policy regression: TLS preservation, timeout routing and no automatic retry.
 source("windows/db-runtime.R")
 source("windows/common.R")
-stopifnot(fp_verify_db_runtime_revision("jdbc-probe-2"))
-for (revision in list(NULL,"jdbc-probe-1","0.0.10"))
+stopifnot(fp_verify_db_runtime_revision("jdbc-probe-3"))
+for (revision in list(NULL,"jdbc-probe-1","jdbc-probe-2","0.0.10"))
     stopifnot(inherits(try(fp_verify_db_runtime_revision(revision),silent=TRUE),"try-error"))
 stopifnot(fp_verify_sql_plan_revision("sql-plan-4"))
 for (revision in list(NULL,"sql-plan-2","sql-plan-3","0.0.10"))
@@ -33,15 +33,18 @@ sqlReport(list(id="render1",status="completed",startedUtc="2026-10-26T00:00:00Z"
 stopifnot(jsonlite::fromJSON(file.path(out,"sql-prepare-state.json"))$status=="completed")
 unlink(out,recursive=TRUE)
 d <- list(dbms = "sql server", extraSettings =
-    "databaseName=fixture;encrypt=false;trustServerCertificate=false;queryTimeout=9;socketTimeout=0")
+    "databaseName=fixture;encrypt=false;trustServerCertificate=false;queryTimeout=9;socketTimeout=0;selectMethod=cursor;responseBuffering=full")
 prepared <- fp_prepare_db_connection(d, list(dbQueryTimeout = 120))
-stopifnot(grepl("encrypt=false", prepared$extraSettings, fixed = TRUE),
+stopifnot(grepl("selectMethod=direct", prepared$extraSettings, fixed=TRUE),
+          grepl("responseBuffering=adaptive", prepared$extraSettings, fixed=TRUE),
+          !grepl("selectMethod=cursor|responseBuffering=full",prepared$extraSettings),
+          grepl("encrypt=false", prepared$extraSettings, fixed = TRUE),
           grepl("trustServerCertificate=false", prepared$extraSettings, fixed = TRUE),
           grepl("queryTimeout=120", prepared$extraSettings, fixed = TRUE),
           grepl("socketTimeout=75000", prepared$extraSettings, fixed = TRUE),
           !grepl("socketTimeout=0", prepared$extraSettings, fixed = TRUE),
           !grepl("queryTimeout=9", prepared$extraSettings, fixed = TRUE),
-          identical(d$extraSettings, "databaseName=fixture;encrypt=false;trustServerCertificate=false;queryTimeout=9;socketTimeout=0"))
+          identical(d$extraSettings, "databaseName=fixture;encrypt=false;trustServerCertificate=false;queryTimeout=9;socketTimeout=0;selectMethod=cursor;responseBuffering=full"))
 stopifnot(fp_socket_timeout_millis(7200L) == 7215000L,
           fp_socket_timeout_millis(.Machine$integer.max) == .Machine$integer.max,
           grepl("socketTimeout=45000", fp_prepare_db_connection(d,

@@ -20,15 +20,30 @@ param($InstallRoot,[bool]$Test,$Study,$Scenario,$Methods,$PatientLimits,$Extract
 $global:FreshCalls.Add('analysis')
 [pscustomobject]@{root=$InstallRoot;test=$Test;study=$Study;scenario=$Scenario;methods=$Methods;limits=$PatientLimits;workers=$ExtractionWorkers;status=$StatusSeconds}
 '@ | Set-Content (Join-Path $temp 'FederatedPS/windows/Run-YUHS.ps1')
+    @'
+param($InstallRoot)
+$global:FreshCalls.Add('package-update')
+if($global:FailFreshUpdate){throw 'fixture package update failure'}
+'@ | Set-Content (Join-Path $temp '10_UPDATE_PACKAGE.ps1')
+    $global:FailFreshUpdate=$false
     $global:FreshCalls=New-Object 'System.Collections.Generic.List[string]'
     $global:FailFreshCheck=$false
     $result=& (Join-Path $temp 'RUN.ps1') -InstallRoot 'fixture-root'
     if (($global:FreshCalls -join ',') -ne 'render-check,analysis' -or $result.test -or
         $result.study -ne 'ppi' -or $result.scenario -ne 'default' -or
         ($result.methods -join ',') -ne 'local-only,pooled' -or $result.workers -ne 1 -or $result.status -ne 10 -or
-        $result.limits[1] -ne 200 -or $result.limits[2] -ne 100 -or $result.limits[3] -ne 300 -or $result.root -ne 'fixture-root') {
+        $result.limits[1] -ne 2 -or $result.limits[2] -ne 2 -or $result.limits[3] -ne 2 -or $result.root -ne 'fixture-root') {
         throw 'RUN options/order changed.'
     }
+    $custom=& (Join-Path $temp 'RUN.ps1') -PatientLimits @{1=20;2=10;3=30}
+    if($custom.limits[1] -ne 20 -or $custom.limits[2] -ne 10 -or $custom.limits[3] -ne 30){throw 'Per-site override lost'}
+    $global:FreshCalls.Clear()
+    & (Join-Path $temp 'RUN.ps1') -UpdatePackage | Out-Null
+    if(($global:FreshCalls -join ',') -ne 'package-update,render-check,analysis'){throw 'UpdatePackage order changed'}
+    $global:FreshCalls.Clear();$global:FailFreshUpdate=$true
+    $caught=$false;try{& (Join-Path $temp 'RUN.ps1') -UpdatePackage | Out-Null}catch{$caught=$true}
+    if(-not $caught -or ($global:FreshCalls -join ',') -ne 'package-update'){throw 'Failed update did not stop RUN'}
+    $global:FailFreshUpdate=$false
     $global:FreshCalls.Clear();$global:FailFreshCheck=$true
     $caught=$false;try { & (Join-Path $temp 'RUN.ps1') | Out-Null } catch { $caught=$true }
     if(-not $caught -or $global:FreshCalls.Count){throw 'Failed rendering did not stop RUN.'}
@@ -103,6 +118,7 @@ $global:FreshCalls.Add('pure-r-update')
     New-Item -ItemType Directory -Path $site -Force | Out-Null
     '{"runId":"Fixture123","methods":["local-only","pooled"],"password":"do-not-copy"}' | Set-Content (Join-Path $run 'run.json')
     'fixture rendering started' | Set-Content (Join-Path $site 'operations.tsv')
+    'fixture first failure' | Set-Content (Join-Path $site 'probe-events.tsv')
     'SELECT 1' | Set-Content (Join-Path $site '001.sql')
     'SECRET' | Set-Content (Join-Path $run 'yuhs.Renviron')
     'PATIENTS' | Set-Content (Join-Path $site 'patients.rds')
@@ -111,7 +127,7 @@ $global:FreshCalls.Add('pure-r-update')
     $zip=[IO.Compression.ZipFile]::OpenRead($zipFile.FullName)
     try {
         $entries=@($zip.Entries.FullName)
-        if(-not ($entries -match 'operations.tsv$') -or -not ($entries -match '001.sql$') -or
+        if(-not ($entries -match 'probe-events.tsv$') -or -not ($entries -match 'operations.tsv$') -or -not ($entries -match '001.sql$') -or
            ($entries -match '\.Renviron$|\.rds$|/run.json$')) {throw 'Diagnostic allowlist changed.'}
         $entry=@($zip.Entries | Where-Object {$_.Name -eq 'run-summary.json'})[0]
         $reader=New-Object IO.StreamReader($entry.Open())
