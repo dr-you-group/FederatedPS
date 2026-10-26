@@ -1,5 +1,7 @@
 # Diagnostics remain local to the role. They never enter the federated exchange.
 # Callers outside the Windows launcher keep SQL logging and short-query guards off.
+.fpsDbRuntimeRevision <- "jdbc-probe-2"
+
 .fpsDiagnosticWrite <- function(name, text, append = FALSE) {
     directory <- getOption("FederatedPs.sqlDiagnosticsDirectory")
     if (is.null(directory) || !nzchar(directory)) return(invisible(FALSE))
@@ -106,7 +108,10 @@
     changedNetworkTimeout <- TRUE
     statement <- call(jConnection, "Ljava/sql/Statement;", "createStatement")
     call(statement, "V", "setQueryTimeout", timeout)
-    call(statement, "V", "setMaxRows", 2L)
+    # Do NOT call setMaxRows here. SQL Server JDBC implements it by sending
+    # SET ROWCOUNT before the actual SELECT, via an uninterruptible connection
+    # command (9.2.0). Bound CARE_SITE in SQL with TOP (2) instead. These probes
+    # must not introduce a hidden command or change session row-count state.
     result <- call(statement, "Ljava/sql/ResultSet;", "executeQuery", sql)
     values <- lapply(columns, function(type) if (type == "integer") integer() else character())
     while (isTRUE(call(result, "Z", "next"))) {
@@ -116,12 +121,30 @@
             if (isTRUE(call(result, "Z", "wasNull"))) value <- if (columns[[i]] == "integer") NA_integer_ else NA_character_
             values[[i]] <- c(values[[i]], value)
         }
-        # JDBC setMaxRows enforces the bound; this also guards unusual drivers.
+        # The caller's SELECT TOP (2) bounds CARE_SITE at the server. SELECT 1
+        # has one row. Keep a client-side guard too, for unusual drivers.
         if (length(values[[1L]]) >= 2L) break
     }
     answer <- as.data.frame(values, stringsAsFactors = FALSE)
     completed <- TRUE
     answer
+}
+
+# Open the connection with a short socket deadline, covering driver-internal
+# setup as well as our probes. Only after the checks pass may bulk extraction
+# use its longer deadline. No timeout change is sent as SQL.
+.fpsSetClinicalNetworkTimeout <- function(connection, jcall = rJava::.jcall,
+        nullExecutor = rJava::.jnull("java/util/concurrent/Executor")) {
+    timeout <- getOption("FederatedPs.clinicalNetworkTimeoutMillis")
+    if (is.null(timeout)) return(invisible(NULL))
+    if (length(timeout) != 1L || !is.numeric(timeout) || is.na(timeout) ||
+        timeout < 1 || timeout > .Machine$integer.max || timeout != floor(timeout))
+        stop("Invalid clinical network timeout")
+    .fpsDbStartupState("JDBC setNetworkTimeout for clinical extraction")
+    .fpsDbOperation("JDBC setNetworkTimeout for clinical extraction",
+        jcall(connection@jConnection, "V", "setNetworkTimeout", nullExecutor, as.integer(timeout)),
+        completed = 0)
+    invisible(NULL)
 }
 
 .fpsSmallSqlQuery <- function(connection, sql, columns) {

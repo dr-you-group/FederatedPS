@@ -39,16 +39,17 @@ make_java <- function(rows, fail = "", failRestore = FALSE) {
 columns <- c(careSiteId = "integer", careSiteName = "character", careSiteSourceValue = "character")
 rows <- data.frame(id = 2L, name = "Synthetic Hospital", source = NA_character_)
 java <- make_java(rows)
-sql <- "SELECT care_site_id, care_site_name, care_site_source_value FROM CDM.CARE_SITE WHERE care_site_id = 2"
+sql <- "SELECT TOP (2) care_site_id, care_site_name, care_site_source_value FROM CDM.CARE_SITE WHERE care_site_id = 2"
 got <- .fpsJdbcSmallQuery("connection", sql, columns, 60, java$call, "null-executor")
 stopifnot(identical(names(got), names(columns)), got$careSiteId == 2L,
           got$careSiteName == "Synthetic Hospital", is.na(got$careSiteSourceValue),
           java$network == 180000L)
 methods <- vapply(java$calls, `[[`, "", "method")
-stopifnot(identical(methods[1:6], c("getNetworkTimeout", "setNetworkTimeout", "createStatement",
-                                  "setQueryTimeout", "setMaxRows", "executeQuery")))
+stopifnot(identical(methods[1:5], c("getNetworkTimeout", "setNetworkTimeout", "createStatement",
+                                  "setQueryTimeout", "executeQuery")),
+          !"setMaxRows" %in% methods)
 stopifnot(java$calls[[2]]$args[[2]] == 75000L, java$calls[[4]]$args[[1]] == 60L,
-          java$calls[[5]]$args[[1]] == 2L, java$calls[[6]]$args[[1]] == sql)
+          java$calls[[5]]$args[[1]] == sql)
 stopifnot(identical(tail(methods, 3), c("close", "close", "setNetworkTimeout")))
 
 for (fail in c("createStatement", "setQueryTimeout", "executeQuery", "next", "getString")) {
@@ -70,9 +71,16 @@ invisible(expect_error(.fpsJdbcSmallQuery("connection", sql, columns, 60, java$c
 java <- make_java(rows, fail = "executeQuery", failRestore = TRUE)
 invisible(expect_error(.fpsJdbcSmallQuery("connection", sql, columns, 60, java$call, "null-executor"), "executeQuery"))
 
-# Only the small-query JDBC boundary gets a retryable classification.
+# Only the small-query JDBC boundary gets the probe error classification.
 methods::setClass("DatabaseConnectorJdbcConnection", slots = c(jConnection = "ANY"))
 connection <- methods::new("DatabaseConnectorJdbcConnection", jConnection = "fixture")
+java <- make_java(rows)
+options(FederatedPs.clinicalNetworkTimeoutMillis = 7215000L)
+.fpsSetClinicalNetworkTimeout(connection, java$call, "null-executor")
+stopifnot(java$network == 7215000L,
+          identical(vapply(java$calls, `[[`, "", "method"), "setNetworkTimeout"))
+options(FederatedPs.clinicalNetworkTimeoutMillis = NULL)
+.fpsSetClinicalNetworkTimeout(connection, function(...) stop("Unexpected timeout change"))
 real_small_query <- .fpsJdbcSmallQuery
 .fpsJdbcSmallQuery <- function(...) stop("fixture JDBC timeout")
 options(FederatedPs.smallQueryTimeoutSeconds = 60)
@@ -126,4 +134,4 @@ stopifnot(identical(.fpsUppercaseCohortTables(aliased, "CDM.CDM"),
     "INNER JOIN CDM.CDM.PERSON AS p ON cohorts.subject_id = p.person_id"))
 options(FederatedPs.progress = NULL)
 unlink(directory, recursive = TRUE)
-cat("PASS: scoped JDBC timeouts, fetch bounds, resource cleanup, retry classification, SQL diagnostics and cohort table aliases\n")
+cat("PASS: no hidden SET ROWCOUNT; scoped/clinical socket deadlines; fetch bounds; cleanup; probe errors; SQL diagnostics\n")

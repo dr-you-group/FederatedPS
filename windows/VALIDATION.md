@@ -1,3 +1,38 @@
+## JDBC probe revision 2 (2026-10-26)
+
+The initial SELECT used Statement.setMaxRows(2). In the pinned Microsoft JDBC
+9.2.0 driver this sends a separate SET ROWCOUNT 2 connection command before the
+SELECT; that command does not use the statement query timer. The small-query
+network timeout and the outer startup watchdog already existed, but the hidden
+command was unnecessary. Remove it and use TOP (2) on CARE_SITE, retaining
+one-row/duplicate validation. Start the JDBC connection with a bounded socket
+policy and switch to the clinical socket deadline only after successful probes.
+
+The first probe failure is preserved without reconnect/retry. The supervisor
+records phase elapsed/deadline independently of the optional progress observer
+and bounds each startup call in addition to the existing per-site total limit.
+A package runtime revision check rejects a stale installed 0.0.10 package; the
+fresh bundle includes 10_UPDATE_PACKAGE.ps1 to install the changed R code.
+
+Validated with Linux R 4.3.3, OpenJDK 17 and PowerShell 7.4.6:
+
+- JDBC call sequence, fetch/NULL/duplicate bounds, failure cleanup, startup and
+  clinical socket deadlines, TLS preservation, no retry and stale revision rejection.
+- Per-call and total watchdog clocks, partial phase reads, independent site IDs,
+  real owned-process cleanup, sequential/parallel scheduling and method routing.
+- The actual pinned JDBC 9.2.0 driver against a local TDS fixture that withholds
+  replies to SET ROWCOUNT: the old setting sends only SET ROWCOUNT 2 and fails;
+  the corrected sequence sends SELECT 1 directly and reads its result.
+- Fresh RUN option forwarding, installation order and diagnostic allowlists.
+
+This is NOT a Windows/HIWARE/live YUHS SQL Server integration test. Without the
+new target-host trace, the hidden command is a confirmed code-path issue and
+reproduction mechanism, not a confirmed diagnosis of the user's live stall.
+Earlier post-connection SQL rendering stalls remain unverified. Existing cache
+files are preserved; source changes may invalidate their extraction fingerprints.
+Clinical extraction SQL (apart from bounding CARE_SITE), cohort criteria, models,
+Cyclops provenance and runtime installers are unchanged.
+
 ## 0.0.10 preprocessing-first launcher hotfix (2026-10-26)
 
 Default ExtractionWorkers is 1 again. The existing single R baseline worker prepares

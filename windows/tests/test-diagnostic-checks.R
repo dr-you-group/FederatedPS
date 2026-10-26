@@ -26,6 +26,7 @@ make_fixture <- function(failConnect = FALSE, failQuery = 0L, failClose = FALSE,
         if (state$queries == invalidQuery) return(data.frame())
         if (state$queries == 1L) return(data.frame(ok = 1L, sessionId = 70L))
         id <- state$queries - 1L
+        stopifnot(grepl("SELECT TOP (2)", sql, fixed = TRUE))
         stopifnot(grepl(paste0("WHERE care_site_id = ", id), sql, fixed = TRUE))
         data.frame(careSiteId = id, careSiteName = "fixture name", careSiteSourceValue = "fixture source")
     }

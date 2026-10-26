@@ -50,13 +50,23 @@ BLAS/OpenMP와 Cyclops의 기존 1-thread 설정을 유지해 기관 병렬화 �
 
 연결 생성·SELECT 1/세션 ID 확인·CARE_SITE 조회/검증 전체에 기관별
 `-ConnectionCheckTimeoutSeconds 180`의 외부 감시를 적용합니다. 첫 JDBC 연결 직전부터
-같은 시작 시각을 유지하므로 기존의 최초 확인 쿼리 1회 재시도도 이 180초에 포함됩니다.
+같은 시작 시각을 유지합니다. 초기 확인 쿼리는 자동으로 재시도하지 않습니다.
 R 초기 패키지 로딩 시간은 포함하지 않습니다. 병렬 모드와 `-ExtractionWorkers 1` 모두 적용됩니다.
 
 JDBC의 내부 쿼리/네트워크 제한이나 Java 호출이 멈추더라도 PowerShell이 별도로 감시합니다.
 초과 시 마지막 JDBC 단계와 시간 초과 기록을 저장하고, 가능한 경우 제한된 시간 내 JVM 스레드 덤프를
 수집한 뒤 이 실행의 작업들을 정리하여 실패로 종료합니다. 덤프/프로세스 정리 시간은 180초에 추가됩니다.
 `-NoProgress` 또는 화면 모니터 비활성화와 관계없이 감시합니다.
+
+초기 접속부터 `socketTimeout=75000`(기본)을 적용합니다. 각 JDBC 호출도
+`SmallQueryTimeoutSeconds + 15`초의 외부 감시를 받으며, 기본값은 75초입니다.
+연결 로그인에는 최소 45초의 호출 제한을 허용하되 전체 180초 제한은 유지합니다.
+확인 성공 뒤에만 임상 추출용 소켓 제한(기본 7215초)으로 전환합니다.
+`setMaxRows(2)`는 드라이버가 별도 `SET ROWCOUNT`를 전송하므로 제거했습니다.
+CARE_SITE는 `SELECT TOP (2)`로 제한하여 중복 행 검증을 유지합니다.
+
+`db-startup-watchdog.log`와 화면에는 site_id, 현재 JDBC 호출, 단계 경과 시간,
+제한 시간을 기록합니다. 이 제한은 ETA나 분석 진척률이 아닙니다.
 
 진행 이벤트는 `getNetworkTimeout`, `setNetworkTimeout`, `createStatement`, `setQueryTimeout`,
 `executeQuery`, `next`, 값 읽기, `close` 등 JDBC 호출 전후를 표시합니다.

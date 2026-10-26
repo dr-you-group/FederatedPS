@@ -95,7 +95,8 @@ $configFile=Join-Path $out 'run.json'
 [IO.File]::WriteAllText($configFile,($config | ConvertTo-Json -Depth 5),(New-Object Text.UTF8Encoding($false)))
 $roles=if($effectiveWorkers -gt 1){@($sites)+@('baselines')}else{@('baselines')}
 $workers=@();$monitor=New-FederatedMonitor -RunDirectory $out -Roles $roles -NoProgress:$NoProgress -Sites $sites -SiteLabels $siteLabels -StatusSeconds $StatusSeconds
-$dbWatchdog=New-FederatedDbWatchdog -RunDirectory $out -RunId $RunId -Sites $sites -TimeoutSeconds $ConnectionCheckTimeoutSeconds
+$dbWatchdog=New-FederatedDbWatchdog -RunDirectory $out -RunId $RunId -Sites $sites -TimeoutSeconds $ConnectionCheckTimeoutSeconds `
+    -OperationTimeoutSeconds ($SmallQueryTimeoutSeconds+15) -StatusSeconds $StatusSeconds
 try {
     $limitText=($sites | ForEach-Object {$_+'='+$resolvedLimits[$_]}) -join ', '
     Write-Host "Methods=$($Methods -join ','); Test=$Test; PatientLimits: $limitText (0=all); ExtractionWorkers=$effectiveWorkers; site queue: $($sites -join ' -> '); RebuildData=$RebuildData. Output: $out"
@@ -116,8 +117,8 @@ try {
     $finishedAt=$null
     $marker=Join-Path $out 'baselines-complete.json'
     while($true){
-        Update-FederatedMonitor $monitor $workers
         Update-FederatedDbWatchdog $dbWatchdog $workers
+        Update-FederatedMonitor $monitor $workers
         $worker=$baselineWorker;$worker.Process.Refresh()
         if($worker.Process.HasExited){Wait-FederatedWorkers $workers 10 $monitor;break}
         if(-not $finishedAt -and (Test-Path -LiteralPath $marker)){$finishedAt=[DateTime]::UtcNow}

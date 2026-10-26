@@ -4,9 +4,14 @@ fp_timeout_value <- function(config, name, default) {
     value <- config[[name]]
     if (is.null(value)) value <- default
     if (!is.numeric(value) || length(value) != 1L || is.na(value) ||
-        !is.finite(value) || value < 1 || value > 2147483647)
+        !is.finite(value) || value != floor(value) || value < 1 || value > 2147483647)
         stop("Invalid timeout: ", name)
     as.integer(value)
+}
+
+fp_socket_timeout_millis <- function(seconds) {
+    # JDBC socketTimeout is a signed int in milliseconds, unlike queryTimeout.
+    as.integer(min(.Machine$integer.max, (as.double(seconds) + 15) * 1000))
 }
 
 fp_configure_db_runtime <- function(config, out) {
@@ -15,6 +20,8 @@ fp_configure_db_runtime <- function(config, out) {
         stop("Cannot create role-local SQL diagnostic directory")
     options(FederatedPs.sqlDiagnosticsDirectory = directory,
             FederatedPs.smallQueryTimeoutSeconds = fp_timeout_value(config, "smallQueryTimeout", 60),
+            FederatedPs.clinicalNetworkTimeoutMillis = fp_socket_timeout_millis(
+                fp_timeout_value(config, "dbQueryTimeout", 7200)),
             errorReportFileLocation = directory)
     site <- basename(out)
     settings <- if (identical(config$dataset, "YUHS")) "yuhs.Renviron" else paste0(site, ".Renviron")
@@ -32,6 +39,8 @@ fp_configure_db_runtime <- function(config, out) {
 fp_db_startup_reporter <- function(config, out, site) {
     started <- NULL
     readyWritten <- FALSE
+    lastPhase <- NULL
+    phaseStartedUtc <- NULL
     publish <- function(value, name) {
         destination <- file.path(out, name)
         jsonlite::write_json(value, paste0(destination, ".partial"), auto_unbox=TRUE, pretty=TRUE)
@@ -47,7 +56,11 @@ fp_db_startup_reporter <- function(config, out, site) {
             started <<- list(runId=config$runId, site=site, pid=Sys.getpid(), startedUtc=now)
             publish(started, "db-startup-start.json")
         }
-        jsonlite::write_json(c(started, list(phase=phase, updatedUtc=now)),
+        if (!identical(lastPhase, phase)) {
+            lastPhase <<- phase
+            phaseStartedUtc <<- now
+        }
+        jsonlite::write_json(c(started, list(phase=phase, phaseStartedUtc=phaseStartedUtc, updatedUtc=now)),
             file.path(out,"db-startup-phase.json"),auto_unbox=TRUE,pretty=TRUE)
         if (isTRUE(ready)) {
             publish(c(started,list(state="checks-passed",completedUtc=now)), "db-startup-ready.json")
@@ -66,23 +79,17 @@ fp_prepare_db_connection <- function(details, config) {
     parts <- strsplit(settings, ";", fixed = TRUE)[[1L]]
     # Only override timeout policy; preserve database, TLS and other settings.
     parts <- parts[nzchar(trimws(parts)) & !grepl(
-        "^\\s*(loginTimeout|queryTimeout|cancelQueryTimeout)\\s*=", parts, ignore.case = TRUE)]
+        "^\\s*(loginTimeout|queryTimeout|cancelQueryTimeout|socketTimeout)\\s*=", parts, ignore.case = TRUE)]
     details$extraSettings <- paste(c(parts, "loginTimeout=30", "cancelQueryTimeout=10",
-        paste0("queryTimeout=", fp_timeout_value(config, "dbQueryTimeout", 7200))), collapse = ";")
+        paste0("queryTimeout=", fp_timeout_value(config, "dbQueryTimeout", 7200)),
+        paste0("socketTimeout=", fp_socket_timeout_millis(
+            fp_timeout_value(config, "smallQueryTimeout", 60)))), collapse = ";")
     details
 }
 
-# This condition is raised ONLY by the tiny initial JDBC probes, before any
-# cohort extraction/temp tables. Clinical SQL, validation and fitting never retry.
+# Preserve the FIRST failure and its diagnostic phase. Reconnecting used to
+# repeat an identical blocked probe and obscure which connection had failed.
+# Neither initial probes nor clinical SQL are automatically replayed.
 fp_get_db_study_data <- function(..., .get = FederatedPs::getDbStudyData) {
-    attempt <- 1L
-    repeat {
-        result <- tryCatch(list(ok = TRUE, value = .get(...)),
-            fps_small_query_error = function(e) list(ok = FALSE, error = e))
-        if (result$ok) return(result$value)
-        if (attempt >= 2L) stop(result$error)
-        message("Initial read-only database probe failed; retrying once with a fresh connection. ",
-                "No cohort extraction is retried. Cause: ", conditionMessage(result$error))
-        attempt <- attempt + 1L
-    }
+    .get(...)
 }

@@ -1,11 +1,20 @@
-# Base-R policy regression: TLS preservation, timeout routing and restricted retry.
+# Policy regression: TLS preservation, timeout routing and no automatic retry.
 source("windows/db-runtime.R")
+source("windows/common.R")
+stopifnot(fp_verify_db_runtime_revision("jdbc-probe-2"))
+for (revision in list(NULL,"jdbc-probe-1","0.0.10"))
+    stopifnot(inherits(try(fp_verify_db_runtime_revision(revision),silent=TRUE),"try-error"))
 source("R/Pda.R")
 out <- tempfile();dir.create(out)
 report <- fp_db_startup_reporter(list(runId="fixtureRun"),out,"17")
 report("Opening JDBC database connection")
 start <- jsonlite::fromJSON(file.path(out,"db-startup-start.json"))
 report("Connection self-check: JDBC executeQuery")
+phase <- jsonlite::fromJSON(file.path(out,"db-startup-phase.json"))
+stopifnot(nzchar(phase$phaseStartedUtc))
+report("Connection self-check: JDBC executeQuery")
+stopifnot(identical(phase$phaseStartedUtc,
+    jsonlite::fromJSON(file.path(out,"db-startup-phase.json"))$phaseStartedUtc))
 stopifnot(identical(start,jsonlite::fromJSON(file.path(out,"db-startup-start.json"))),
     start$pid==Sys.getpid(),start$site=="17",!file.exists(file.path(out,"db-startup-ready.json")))
 report("Connection self-check and CARE_SITE validation passed",TRUE)
@@ -15,15 +24,21 @@ report("Closing database connection")
 stopifnot(identical(ready,jsonlite::fromJSON(file.path(out,"db-startup-ready.json"))))
 unlink(out,recursive=TRUE)
 d <- list(dbms = "sql server", extraSettings =
-    "databaseName=fixture;encrypt=false;trustServerCertificate=false;queryTimeout=9")
+    "databaseName=fixture;encrypt=false;trustServerCertificate=false;queryTimeout=9;socketTimeout=0")
 prepared <- fp_prepare_db_connection(d, list(dbQueryTimeout = 120))
 stopifnot(grepl("encrypt=false", prepared$extraSettings, fixed = TRUE),
           grepl("trustServerCertificate=false", prepared$extraSettings, fixed = TRUE),
           grepl("queryTimeout=120", prepared$extraSettings, fixed = TRUE),
+          grepl("socketTimeout=75000", prepared$extraSettings, fixed = TRUE),
+          !grepl("socketTimeout=0", prepared$extraSettings, fixed = TRUE),
           !grepl("queryTimeout=9", prepared$extraSettings, fixed = TRUE),
-          identical(d$extraSettings, "databaseName=fixture;encrypt=false;trustServerCertificate=false;queryTimeout=9"))
+          identical(d$extraSettings, "databaseName=fixture;encrypt=false;trustServerCertificate=false;queryTimeout=9;socketTimeout=0"))
+stopifnot(fp_socket_timeout_millis(7200L) == 7215000L,
+          fp_socket_timeout_millis(.Machine$integer.max) == .Machine$integer.max,
+          grepl("socketTimeout=45000", fp_prepare_db_connection(d,
+              list(smallQueryTimeout=30))$extraSettings, fixed=TRUE))
 stopifnot(identical(fp_prepare_db_connection(list(dbms="postgresql"), list()), list(dbms="postgresql")))
-for (x in list(0, -1, NA_real_, Inf, "60", c(1, 2))) {
+for (x in list(0, -1, 1.5, NA_real_, Inf, "60", c(1, 2))) {
     stopifnot(inherits(try(fp_timeout_value(list(smallQueryTimeout=x), "smallQueryTimeout", 60), silent=TRUE), "try-error"))
 }
 stopifnot(.exchangeWaitSeconds(-3, 10, 100) == 100,
@@ -36,16 +51,13 @@ for (x in list(0, NA_real_, Inf, "60", c(1,2)))
 failure <- structure(list(message="fixture initial query timeout", call=NULL),
     class=c("fps_small_query_error", "error", "condition"))
 calls <- 0
-answer <- fp_get_db_study_data(.get=function(...) {
-    calls <<- calls+1L
-    if (calls==1L) stop(failure)
-    42
-})
-stopifnot(answer==42, calls==2L)
+answer <- fp_get_db_study_data(.get=function(...) {calls <<- calls+1L;42})
+stopifnot(answer==42, calls==1L)
 calls <- 0
 result <- try(fp_get_db_study_data(.get=function(...) {calls <<- calls+1L;stop(failure)}), silent=TRUE)
-stopifnot(inherits(result,"try-error"), calls==2L)
+stopifnot(inherits(result,"try-error"), calls==1L,
+          identical(attr(result,"condition"), failure))
 calls <- 0
 result <- try(fp_get_db_study_data(.get=function(...) {calls <<- calls+1L;stop("clinical SQL failed")}), silent=TRUE)
 stopifnot(inherits(result,"try-error"), calls==1L)
-cat("PASS: startup vs training timeouts, TLS preservation, timeout validation, initial-query retry once, no clinical retry\n")
+cat("PASS: startup vs training timeouts, phase clocks, TLS preservation, integer bounds, first error preserved without retry\n")

@@ -32,7 +32,7 @@ fp_diagnostic_checks <- function(details, careSites, schema, connect, disconnect
     for (i in seq_along(ids)) {
         role <- names(careSites)[[i]]
         id <- ids[[i]]
-        sql <- sprintf(paste("SELECT care_site_id, care_site_name, care_site_source_value",
+        sql <- sprintf(paste("SELECT TOP (2) care_site_id, care_site_name, care_site_source_value",
             "FROM %s.CARE_SITE WHERE care_site_id = %d"), schema, id)
         answer <- operation(paste("CARE_SITE lookup:", role), smallQuery(connection, sql,
             c(careSiteId = "integer", careSiteName = "character", careSiteSourceValue = "character")),

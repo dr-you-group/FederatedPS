@@ -104,9 +104,10 @@
                                         "; R PID", Sys.getpid()))
     }
     step(0, "CARE_SITE lookup")
-    institution <- query(sprintf("SELECT care_site_id, care_site_name, care_site_source_value FROM %s.CARE_SITE WHERE care_site_id = %d", schema, careSiteId),
+    institution <- query(sprintf("SELECT TOP (2) care_site_id, care_site_name, care_site_source_value FROM %s.CARE_SITE WHERE care_site_id = %d", schema, careSiteId),
         smallColumns = c(careSiteId = "integer", careSiteName = "character", careSiteSourceValue = "character"))
     if (nrow(institution) != 1L) stop("Expected one CARE_SITE row for careSiteId ", careSiteId)
+    .fpsSetClinicalNetworkTimeout(connection)
     .fpsDbStartupState("Connection self-check and CARE_SITE validation passed", ready = TRUE)
     step(1, "SitePartition.sql: assigning exclusive patients and visits")
     execute("SitePartition.sql")

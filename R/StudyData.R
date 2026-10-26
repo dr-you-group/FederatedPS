@@ -50,7 +50,7 @@ getDbStudyData <- function(connectionDetails, cdmDatabaseSchema, study = "opioid
     connection <- .fpsDbOperation("Opening database connection",
         DatabaseConnector::connect(connectionDetails), stage = "connecting")
     # A timeout can already have closed JDBC. Cleanup must not replace the
-    # original classified error used for the safe initial-connection retry.
+    # original classified probe error. The Windows launcher does not retry it.
     on.exit(try({
         .fpsDbStartupState("Closing JDBC database connection")
         DatabaseConnector::disconnect(connection)

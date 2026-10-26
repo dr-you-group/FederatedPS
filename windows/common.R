@@ -6,6 +6,14 @@ fp_check_names <- function(run_id, sites) {
         stop("Provide distinct alphanumeric sites; aggregator and total are reserved")
 }
 
+fp_verify_db_runtime_revision <- function(installedRevision = tryCatch(
+        utils::getFromNamespace(".fpsDbRuntimeRevision", "FederatedPs"), error = function(e) NULL)) {
+    if (!identical(installedRevision, "jdbc-probe-2"))
+        stop("Installed FederatedPs lacks the JDBC probe fix. Run 10_UPDATE_PACKAGE.ps1 ",
+             "(or windows/Update-FederatedPs.ps1), then start a new R process.")
+    invisible(TRUE)
+}
+
 fp_verify_runtime <- function(project) {
     lock <- jsonlite::fromJSON(file.path(project, "windows", "runtime-lock.json"))
     if (.Platform$OS.type != "windows" || .Machine$sizeof.pointer != 8L ||
@@ -26,6 +34,7 @@ fp_verify_runtime <- function(project) {
     expected_version <- read.dcf(file.path(project, "DESCRIPTION"))[1, "Version"]
     if (as.character(utils::packageVersion("FederatedPs")) != expected_version)
         stop("FederatedPs version differs from the checkout; rerun Install-Offline.ps1")
+    fp_verify_db_runtime_revision()
     if (!identical(utils::packageDescription("Cyclops")$RemoteSha, lock$cyclopsCommit) ||
         !all(c("aggregate", "blockSize", "alpha") %in% names(formals(Cyclops::createControl))))
         stop("Old Cyclops detected. Run Install-Offline.ps1 to build the pinned block CCD fork")
@@ -38,7 +47,7 @@ fp_verify_runtime <- function(project) {
         stop("SQL Server JDBC missing; transfer the new payload and run Install-Offline.ps1")
     rJava::.jinit()
     if (!"ppi" %in% FederatedPs::listStudies()$study) stop("Study metadata missing")
-    cat("PASS: offline R, block Cyclops, FederatedPs, JVM and JDBC\n")
+    cat("PASS: offline R, block Cyclops, FederatedPs, JVM and JDBC [jdbc-probe-2]\n")
     invisible(TRUE)
 }
 

@@ -3,8 +3,17 @@
 # This helper only reports a timeout. The owning launcher captures diagnostics
 # and stops its own retained workers through its existing failure/finally path.
 function New-FederatedDbWatchdog {
-    param([string]$RunDirectory,[string]$RunId,[string[]]$Sites,[int]$TimeoutSeconds=180)
-    @{Root=$RunDirectory;RunId=$RunId;Sites=$Sites;Timeout=$TimeoutSeconds;Started=@{};Ready=@{}}
+    param([string]$RunDirectory,[string]$RunId,[string[]]$Sites,[int]$TimeoutSeconds=180,
+          [int]$OperationTimeoutSeconds=75,[int]$StatusSeconds=10)
+    @{Root=$RunDirectory;RunId=$RunId;Sites=$Sites;Timeout=$TimeoutSeconds;Started=@{};Ready=@{};
+      OperationTimeout=$OperationTimeoutSeconds;StatusSeconds=$StatusSeconds;LastStatus=@{};Phase=@{}}
+}
+
+function Write-FederatedDbWatchdogLine($Watchdog,[string]$Text) {
+    $line='[{0}] {1}' -f [DateTime]::Now.ToString('HH:mm:ss'),$Text
+    Write-Host $line
+    try { [IO.File]::AppendAllText((Join-Path $Watchdog.Root 'db-startup-watchdog.log'),
+        $line+[Environment]::NewLine,(New-Object Text.UTF8Encoding($false))) } catch { }
 }
 
 function Update-FederatedDbWatchdog {
@@ -36,20 +45,44 @@ function Update-FederatedDbWatchdog {
                     throw "Invalid DB startup completion marker for site_id=$site."
                 }
                 $Watchdog.Ready[$key]=$true
+                Write-FederatedDbWatchdogLine $Watchdog "DB ready: site_id=$site; connection and checks passed. Starting clinical extraction."
                 continue
             }
             # Explicit Now keeps deadline tests deterministic; production uses UTC.
             $elapsed=($Now-(ConvertTo-FederatedUtc $start.startedUtc)).TotalSeconds
-            if($elapsed -lt $Watchdog.Timeout){continue}
             $phase='Opening JDBC database connection (no later phase available)'
+            $phaseElapsed=$null
             $phasePath=Join-Path $directory 'db-startup-phase.json'
             try {
                 $detail=Get-Content -LiteralPath $phasePath -Raw -Encoding UTF8 | ConvertFrom-Json
-                if($detail.runId -ceq $start.runId -and $detail.pid -eq $start.pid -and $detail.site -ceq $site){$phase=[string]$detail.phase}
+                if($detail.runId -ceq $start.runId -and $detail.pid -eq $start.pid -and $detail.site -ceq $site -and
+                    [string]$detail.startedUtc -ceq [string]$start.startedUtc){
+                    $Watchdog.Phase[$key]=$detail
+                }
             } catch { } # Phase snapshot is optional and may be mid-write.
-            $message="DB startup exceeded $($Watchdog.Timeout)s for site_id=$site; last phase: $phase. JDBC did not finish connection/self-check/CARE_SITE validation. No clinical SQL is retried. See $directory and shutdown-thread-$($worker.Role).txt."
+            if($Watchdog.Phase.ContainsKey($key)) {
+                $detail=$Watchdog.Phase[$key];$phase=[string]$detail.phase
+                if($detail.PSObject.Properties['phaseStartedUtc']) {
+                    try { $phaseElapsed=[Math]::Max(0,($Now-(ConvertTo-FederatedUtc $detail.phaseStartedUtc)).TotalSeconds) } catch { }
+                }
+            }
+            # SmallQueryTimeout may be as low as 1s. The connection still gets
+            # its configured 30s login deadline plus a bounded 15s margin.
+            $phaseLimit=if($phase -like 'Opening *connection*'){[Math]::Max(45,$Watchdog.OperationTimeout)}else{$Watchdog.OperationTimeout}
+            if(-not $Watchdog.LastStatus.ContainsKey($key) -or
+                ($Now-$Watchdog.LastStatus[$key]).TotalSeconds -ge $Watchdog.StatusSeconds) {
+                $phaseText=if($null -eq $phaseElapsed){'unknown'}else{[string][Math]::Floor($phaseElapsed)+'s / '+$phaseLimit+'s limit'}
+                Write-FederatedDbWatchdogLine $Watchdog ("DB startup: site_id=$site; phase=$phase; phase wait=$phaseText; total="+[Math]::Floor($elapsed)+"s / $($Watchdog.Timeout)s limit (deadline, not ETA)")
+                $Watchdog.LastStatus[$key]=$Now
+            }
+            $operationExpired=$null -ne $phaseElapsed -and $phaseElapsed -ge $phaseLimit
+            if($elapsed -lt $Watchdog.Timeout -and -not $operationExpired){continue}
+            $reason=if($operationExpired){"DB operation exceeded $($phaseLimit)s"}else{"DB startup exceeded $($Watchdog.Timeout)s"}
+            $message="$reason for site_id=$site; last phase: $phase. JDBC did not finish connection/self-check/CARE_SITE validation. No automatic retry. See $directory and shutdown-thread-$($worker.Role).txt."
             [IO.File]::WriteAllText((Join-Path $Watchdog.Root ('db-startup-timeout-'+$site+'.json')),
-                (@{site=$site;pid=$start.pid;runId=$start.runId;phase=$phase;elapsedSeconds=[Math]::Floor($elapsed);limitSeconds=$Watchdog.Timeout;state='timeout'} | ConvertTo-Json),
+                (@{site=$site;pid=$start.pid;runId=$start.runId;phase=$phase;elapsedSeconds=[Math]::Floor($elapsed);
+                    phaseElapsedSeconds=$phaseElapsed;operationLimitSeconds=$phaseLimit;
+                    limitSeconds=$Watchdog.Timeout;state='timeout'} | ConvertTo-Json),
                 (New-Object Text.UTF8Encoding($false)))
             throw $message
         }

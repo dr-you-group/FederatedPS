@@ -46,5 +46,22 @@ try {
     $caught=$false
     try{Update-FederatedDbWatchdog $g @($a) $now}catch{$caught=$_.Exception.Message -match 'Invalid DB startup marker identity'}
     if(-not $caught){throw 'Foreign start marker accepted'}
+    # A stuck JNI/JDBC call is limited independently of the 180s total and
+    # independent of the optional UI progress observer. Partial snapshots do
+    # not erase the last validated phase or restart its clock.
+    $g=New-FederatedDbWatchdog $root run1 @('99') 180 -OperationTimeoutSeconds 75
+    $c=FixtureWorker 99 1004
+    $record=Marker 99 1004 90
+    $record['phase']='Connection self-check: JDBC executeQuery'
+    $record['phaseStartedUtc']=$now.AddSeconds(-74).ToString('o')
+    $record | ConvertTo-Json | Set-Content (Join-Path $root 'extraction/99/db-startup-phase.json')
+    Update-FederatedDbWatchdog $g @($c) $now
+    '{' | Set-Content (Join-Path $root 'extraction/99/db-startup-phase.json')
+    $caught=$false
+    try{Update-FederatedDbWatchdog $g @($c) $now.AddSeconds(2)}catch{$caught=$_.Exception.Message -match 'DB operation exceeded 75s.*JDBC executeQuery'}
+    if(-not $caught){throw 'Per-operation guard lost its last valid phase'}
+    $evidence=Get-Content (Join-Path $root 'db-startup-timeout-99.json') -Raw | ConvertFrom-Json
+    if($evidence.phaseElapsedSeconds -ne 76 -or $evidence.operationLimitSeconds -ne 75){throw 'Wrong phase timeout evidence'}
+    if(-not(Test-Path (Join-Path $root 'db-startup-watchdog.log'))){throw 'Missing independent startup status log'}
     Write-Host 'PASS: startup deadline independent of progress; atomic start/ready identity; malformed optional phase; no DB/sample/cache path; sequential and parallel roles; long clinical work exempt'
 } finally {Remove-Item -LiteralPath $root -Recurse -Force}
