@@ -10,6 +10,7 @@ param(
     [ValidateRange(15,900)][int]$TimeoutSeconds = 180,
     [ValidateSet('full','adaptive')][string]$ResponseBuffering = 'full',
     [ValidateSet('care-site-id','care-site-text','synthetic-text')][string]$ProbeMode = 'care-site-id',
+    [switch]$CapturePreExitThreads,
     [int[]]$SiteIds,
     [string]$OutputDirectory = ''
 )
@@ -28,6 +29,7 @@ $options = @{
     Project=$project; InstallRoot=$InstallRoot; RHome=$RHome; JavaHome=$JavaHome
     ConfigDirectory=$ConfigDirectory; SmallQueryTimeoutSeconds=$SmallQueryTimeoutSeconds
     TimeoutSeconds=$TimeoutSeconds; ResponseBuffering=$ResponseBuffering; ProbeMode=$ProbeMode
+    CapturePreExitThreads=$CapturePreExitThreads
     OutputDirectory=$OutputDirectory
 }
 if ($PSBoundParameters.ContainsKey('SiteIds')) { $options.SiteIds=$SiteIds }

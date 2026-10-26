@@ -257,7 +257,11 @@ public class JdbcConnectionProbe {
         Connection connection = null;
         int code = 2;
         try {
-            if (args.length != 5) throw new IllegalArgumentException("Expected timeout, total deadline, buffering, site IDs and probe mode");
+            if (args.length != 5 && args.length != 6)
+                throw new IllegalArgumentException("Expected timeout, total deadline, buffering, site IDs, probe mode and optional snapshot flag");
+            if (args.length == 6 && !(args[5].equals("true") || args[5].equals("false")))
+                throw new IllegalArgumentException("Snapshot flag must be true or false");
+            boolean capturePreExitThreads = args.length == 6 && Boolean.parseBoolean(args[5]);
             int queryTimeout = Integer.parseInt(args[0]);
             int totalTimeout = Integer.parseInt(args[1]);
             if (queryTimeout < 1 || queryTimeout > 300 || totalTimeout < 1 || totalTimeout > 900 ||
@@ -274,6 +278,7 @@ public class JdbcConnectionProbe {
             log("JDBC_ACTIVE=" + actualJar);
             log("JAVA_VERSION=" + System.getProperty("java.version") + " JAVA_VENDOR=" + System.getProperty("java.vendor"));
             log("PROBE_MODE=" + args[4]);
+            log("CAPTURE_PRE_EXIT_THREADS=" + capturePreExitThreads);
             log("PROFILE queryTimeout=" + queryTimeout + " socketTimeout=" + ((queryTimeout + 15) * 1000) +
                 " loginTimeout=30 cancelQueryTimeout=10 selectMethod=direct responseBuffering=" + args[2] +
                 " encrypt=" + config[7] + " trustServerCertificate=" + config[8]);
@@ -296,7 +301,9 @@ public class JdbcConnectionProbe {
             }
             start("Connection.close"); connection.close(); connection = null; end();
             log("CHECKS_COMPLETE: independent Java checks and explicit close finished; waiting for process exit");
-            start("Pre-exit thread snapshot"); preExitThreadSnapshot(); end();
+            if (capturePreExitThreads) {
+                start("Pre-exit thread snapshot"); preExitThreadSnapshot(); end();
+            }
             code = 0;
         } catch (Throwable error) {
             failure(error);

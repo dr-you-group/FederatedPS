@@ -24,6 +24,8 @@ snapshot_fixture = False
 
 def through_powershell(argv, input, **kwargs):
     fields = [bytes.fromhex(line).decode() for line in input.splitlines()[1:]]
+    capture = len(argv) == 10 and argv[9] == "true"
+    mode = argv[8]
     with tempfile.TemporaryDirectory(prefix="fps-java-launcher-") as temporary:
         root = Path(temporary)
         project = root / "project space"
@@ -107,9 +109,12 @@ function Stop-FederatedProcessTree($Process) {
                 # These test-only options are never added by the real launcher.
                 environment["JDK_JAVA_OPTIONS"] = "--limit-modules=java.se"
             launcher = fixture_tools / "Test-JavaConnection.ps1"
-        result = real_run([os.environ["FPS_PWSH"], "-NoLogo", "-NoProfile", "-File",
+        command = [os.environ["FPS_PWSH"], "-NoLogo", "-NoProfile", "-File",
             str(launcher), "-Project", str(project),
-            "-SmallQueryTimeoutSeconds", "1", "-TimeoutSeconds", "15", "-ProbeMode", argv[-1]],
+            "-SmallQueryTimeoutSeconds", "1", "-TimeoutSeconds", "15", "-ProbeMode", mode]
+        if capture:
+            command.append("-CapturePreExitThreads")
+        result = real_run(command,
             text=True, capture_output=True, env=environment, timeout=40 if shutdown_fixture else 25)
         archives = list((project / "work/diagnostics").glob("*.zip"))
         assert len(archives) == 1, result.stdout + result.stderr
@@ -119,26 +124,27 @@ function Stop-FederatedProcessTree($Process) {
             texts = {Path(name).name: archive.read(name).decode("utf-8-sig") for name in names}
         receipt = json.loads(texts["result.json"])
         assert receipt["independentJvm"] and receipt["sites"] == [1, 2, 3], receipt
-        assert receipt["probeMode"] == argv[-1], receipt
+        assert receipt["probeMode"] == mode and receipt["capturePreExitThreads"] == capture, receipt
         assert receipt["launchMode"] == ("compiled-java11" if compiled_fixture else "source"), receipt
         # Process metrics may be unavailable on a host that does not expose its
         # child process table. Preserve null rather than inventing a zero value.
         assert receipt["processSamples"] and all(
             (x["cpuSeconds"] is None or x["cpuSeconds"] >= 0) and
             (x["threads"] is None or x["threads"] > 0) for x in receipt["processSamples"]), receipt
-        expected = "post-check-timeout" if snapshot_fixture else "shutdown-timeout" if shutdown_fixture else "passed" if receipt["exitCode"] == 0 else "failed"
+        snapshot_stall = snapshot_fixture and capture
+        expected = "post-check-timeout" if snapshot_stall else "shutdown-timeout" if shutdown_fixture else "passed" if receipt["exitCode"] == 0 else "failed"
         assert receipt["state"] == expected, receipt
         assert receipt["processExited"] and receipt["outputDrained"], receipt
         assert Path(receipt["javaExecutable"]) == java_home / "bin/java.exe", receipt
         assert receipt["normalExitObserved"] == (expected == "passed"), receipt
         assert receipt["checksComplete"] == (expected in ("passed", "shutdown-timeout", "post-check-timeout")), receipt
         assert receipt["forcedTermination"] == shutdown_fixture, receipt
-        assert receipt["terminationRequested"] == (not snapshot_fixture), receipt
-        assert receipt["snapshotStarted"] == (expected != "failed"), receipt
-        assert receipt["snapshotFinished"] == (expected in ("passed", "shutdown-timeout")), receipt
+        assert receipt["terminationRequested"] == (not snapshot_stall), receipt
+        assert receipt["snapshotStarted"] == (capture and expected != "failed"), receipt
+        assert receipt["snapshotFinished"] == (capture and expected in ("passed", "shutdown-timeout")), receipt
         if shutdown_fixture:
             assert "process shutdown failure, not a query timeout" in receipt["failure"], receipt
-        if snapshot_fixture:
+        if snapshot_stall:
             assert "does not prove shutdown had started" in receipt["failure"], receipt
         assert (result.returncode == 0) == (receipt["state"] == "passed"), result.stdout + result.stderr
         all_output = result.stdout + result.stderr + "".join(texts.values())
@@ -149,6 +155,7 @@ function Stop-FederatedProcessTree($Process) {
 
 wire.subprocess = types.SimpleNamespace(run=through_powershell)
 wire.run("normal")
+wire.run("normal", capture=True)
 wire.run("normal", mode="synthetic-text")
 wire.run("late-error")
 compiled_fixture = True
@@ -159,5 +166,8 @@ shutdown_fixture = True
 wire.run("shutdown")
 shutdown_fixture = False
 snapshot_fixture = True
-wire.run("post-check")
+compiled_fixture = True
+# The compiled default succeeds even though the snapshot method would hang.
+wire.run("normal")
+wire.run("post-check", capture=True)
 print("PASS: actual PowerShell/private base-R/standalone JDBC pipeline, mapping, success/failure receipt, ZIP and no credentials/private packet in outputs")

@@ -8,6 +8,7 @@ param([string]$Project='', [string]$InstallRoot='C:\FederatedPS',
       [ValidateRange(15,900)][int]$TimeoutSeconds=180,
       [ValidateSet('full','adaptive')][string]$ResponseBuffering='full',
       [ValidateSet('care-site-id','care-site-text','synthetic-text')][string]$ProbeMode='care-site-id',
+      [switch]$CapturePreExitThreads,
       [string]$OutputDirectory='')
 $ErrorActionPreference='Stop'
 if (-not $Project) { $Project=Join-Path $PSScriptRoot '..' }
@@ -86,7 +87,7 @@ try {
     for($i=0;$i -lt $pathBytes.Length;$i++) { $pathBytes[$i]=[Convert]::ToByte($privateLines[1].Substring(2*$i,2),16) }
     $jar=[Text.Encoding]::UTF8.GetString($pathBytes)
     if (-not(Test-Path -LiteralPath $jar -PathType Leaf)) { throw 'The selected JDBC JAR does not exist.' }
-    Write-Host "Independent Java probe: $(Split-Path $jar -Leaf); launch=$launchMode; mode=$ProbeMode; site_ids=$($SiteIds -join ','); buffering=$ResponseBuffering."
+    Write-Host "Independent Java probe: $(Split-Path $jar -Leaf); launch=$launchMode; mode=$ProbeMode; site_ids=$($SiteIds -join ','); buffering=$ResponseBuffering; preExitThreads=$([bool]$CapturePreExitThreads)."
     Write-Host "Logs: $out"
     $process=New-Object Diagnostics.Process
     $process.StartInfo=New-Object Diagnostics.ProcessStartInfo
@@ -99,7 +100,7 @@ try {
         $arguments=@('--class-path',$classPath,'JdbcConnectionProbe')
     }else{$arguments=@('--class-path',$jar,$source)}
     $arguments+=@([string]$SmallQueryTimeoutSeconds,[string]$TimeoutSeconds,
-        $ResponseBuffering,($SiteIds -join ','),$ProbeMode)
+        $ResponseBuffering,($SiteIds -join ','),$ProbeMode,([string][bool]$CapturePreExitThreads).ToLowerInvariant())
     $process.StartInfo.Arguments=(($arguments | ForEach-Object {ConvertTo-NativeArgument $_}) -join ' ')
     $process.StartInfo.WorkingDirectory=$Project
     $process.StartInfo.UseShellExecute=$false;$process.StartInfo.CreateNoWindow=$true
@@ -212,7 +213,7 @@ $receipt=[ordered]@{state=$state;independentJvm=$true;driverFile=if($jar){Split-
     terminationRequested=[bool]$terminationRequested;snapshotStarted=[bool]$snapshotStarted;snapshotFinished=[bool]$snapshotFinished;
     normalExitObserved=[bool]($processExited -and -not $forcedTermination -and $exitCode -eq 0);
     forcedTermination=$forcedTermination;outputDrained=$outputDrained;
-    sites=@($SiteIds);probeMode=$ProbeMode;responseBuffering=$ResponseBuffering;smallQueryTimeout=$SmallQueryTimeoutSeconds;
+    sites=@($SiteIds);probeMode=$ProbeMode;capturePreExitThreads=[bool]$CapturePreExitThreads;responseBuffering=$ResponseBuffering;smallQueryTimeout=$SmallQueryTimeoutSeconds;
     totalTimeout=$TimeoutSeconds;exitCode=$exitCode;elapsedSeconds=[Math]::Round(([DateTime]::UtcNow-$started).TotalSeconds,3);
     failure=$failure;processSamples=@($processSamples.ToArray());
     scope=if($ProbeMode -eq 'synthetic-text'){'SELECT 1 and fixed synthetic strings only; no CDM rows'}else{'SELECT 1 and bounded CARE_SITE queries only; no cohort extraction'}}

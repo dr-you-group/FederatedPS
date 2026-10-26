@@ -63,7 +63,7 @@ def error():
     return b"\xaa" + struct.pack("<H", len(body)) + body
 
 
-def run(case, buffering="full", mode="care-site-id", text_type="nvarchar"):
+def run(case, buffering="full", mode="care-site-id", text_type="nvarchar", capture=False):
     server = socket.socket()
     server.bind(("127.0.0.1", 0))
     server.listen(1)
@@ -136,8 +136,11 @@ def run(case, buffering="full", mode="care-site-id", text_type="nvarchar"):
     fields = [str(JAR), "127.0.0.1", str(port), "fixture", USER, PASSWORD, "fixture.CDM", "false", "false"]
     packet = "FPS_JAVA_PROBE_V1\n" + "\n".join(x.encode().hex() for x in fields) + "\n"
     begun = time.monotonic()
-    result = subprocess.run([JAVA, "--class-path", str(JAR), str(ROOT / "windows/JdbcConnectionProbe.java"),
-        "1", "4", buffering, "1,2,3", mode], input=packet, text=True, capture_output=True, timeout=12)
+    arguments = [JAVA, "--class-path", str(JAR), str(ROOT / "windows/JdbcConnectionProbe.java"),
+        "1", "4", buffering, "1,2,3", mode]
+    if capture:
+        arguments.append("true")
+    result = subprocess.run(arguments, input=packet, text=True, capture_output=True, timeout=12)
     elapsed = time.monotonic() - begun
     worker.join(2)
     assert not failures, failures
@@ -146,16 +149,21 @@ def run(case, buffering="full", mode="care-site-id", text_type="nvarchar"):
     assert not any("SET ROWCOUNT" in q for q in queries), queries
     assert "SQL_SERVER_SPID=77" in text, text
     assert "PROBE_MODE=" + mode in text and "JAVA_HEARTBEAT" in result.stderr, text
+    assert "CAPTURE_PRE_EXIT_THREADS=" + str(capture).lower() in text, text
     if case == "normal":
         assert result.returncode == 0 and "CHECKS_COMPLETE:" in text, text
         assert "START JVM termination System.exit(0)" in text, text
-        sequence = ["DONE Connection.close", "CHECKS_COMPLETE:", "JAVA_PRE_EXIT_THREAD_DUMP_BEGIN",
-                    "JAVA_PRE_EXIT_THREAD_DUMP_END", "START JVM termination System.exit(0)",
-                    "JAVA_SHUTDOWN_HOOK_BEGIN", "JAVA_SHUTDOWN_HOOK_END"]
+        sequence = ["DONE Connection.close", "CHECKS_COMPLETE:"]
+        if capture:
+            sequence += ["JAVA_PRE_EXIT_THREAD_DUMP_BEGIN", "JAVA_PRE_EXIT_THREAD_DUMP_END"]
+        else:
+            assert "JAVA_PRE_EXIT_THREAD_DUMP_BEGIN" not in text and "JAVA_THREAD_DUMP_BEGIN" not in text, text
+        sequence += ["START JVM termination System.exit(0)", "JAVA_SHUTDOWN_HOOK_BEGIN", "JAVA_SHUTDOWN_HOOK_END"]
         positions = [result.stdout.index(marker) for marker in sequence]
         assert positions == sorted(positions), result.stdout
         assert "JAVA_SHUTDOWN_HOOK_BEGIN_RAW" in result.stderr and "JAVA_SHUTDOWN_HOOK_END_RAW" in result.stderr, result.stderr
-        assert "name=[REDACTED]" in result.stdout, result.stdout
+        if capture:
+            assert "name=[REDACTED]" in result.stdout, result.stdout
         expected = [] if mode == "synthetic-text" else [1, 2, 3]
         assert [int(re.search(r"care_site_id = ([0-9]+)$", q)[1]) for q in queries if q.startswith("SELECT TOP (2)")] == expected, queries
         count = 4 if mode == "synthetic-text" else 8
@@ -196,6 +204,7 @@ def run(case, buffering="full", mode="care-site-id", text_type="nvarchar"):
 
 if __name__ == "__main__":
     run("normal")
+    run("normal", capture=True)
     run("normal", "adaptive")
     run("normal", mode="care-site-text")
     run("normal", mode="care-site-text", text_type="varchar")
