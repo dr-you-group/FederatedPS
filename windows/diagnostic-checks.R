@@ -32,13 +32,16 @@ fp_diagnostic_checks <- function(details, careSites, schema, connect, disconnect
     for (i in seq_along(ids)) {
         role <- names(careSites)[[i]]
         id <- ids[[i]]
-        sql <- sprintf(paste("SELECT TOP (2) care_site_id, care_site_name, care_site_source_value",
+        sql <- sprintf(paste("SELECT TOP (2) care_site_id",
             "FROM %s.CARE_SITE WHERE care_site_id = %d"), schema, id)
         answer <- operation(paste("CARE_SITE lookup:", role), smallQuery(connection, sql,
-            c(careSiteId = "integer", careSiteName = "character", careSiteSourceValue = "character")),
+            c(careSiteId = "integer")),
             sql = sql, stage = "diagnostic")
-        if (nrow(answer) != 1L || !isTRUE(answer$careSiteId == id))
-            stop("Expected one CARE_SITE row for ", role)
+        returnedId <- if (is.data.frame(answer)) answer[["careSiteId"]] else NULL
+        if (!is.data.frame(answer) || nrow(answer) != 1L || !is.numeric(returnedId) ||
+            length(returnedId) != 1L || is.na(returnedId) ||
+            !is.finite(returnedId) || returnedId != id)
+            stop("Expected one non-NULL matching numeric CARE_SITE row for ", role)
         report("CHECK OK:", role, "CARE_SITE", id, "returned one row\n")
     }
     disconnectAttempted <- TRUE

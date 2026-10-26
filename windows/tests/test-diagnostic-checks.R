@@ -7,7 +7,7 @@ expect_error <- function(expr, text) {
 }
 sites <- list(severance = 1L, gangnam = 2L, yongin = 3L)
 make_fixture <- function(failConnect = FALSE, failQuery = 0L, failClose = FALSE,
-                         invalidQuery = 0L) {
+                         invalidQuery = 0L, careSiteAnswer = NULL) {
     state <- new.env(parent = emptyenv())
     state$queries <- 0L; state$closes <- 0L; state$events <- character(); state$messages <- character()
     state$connect <- function(details) {
@@ -26,9 +26,12 @@ make_fixture <- function(failConnect = FALSE, failQuery = 0L, failClose = FALSE,
         if (state$queries == invalidQuery) return(data.frame())
         if (state$queries == 1L) return(data.frame(ok = 1L, sessionId = 70L))
         id <- state$queries - 1L
-        stopifnot(grepl("SELECT TOP (2)", sql, fixed = TRUE))
+        stopifnot(grepl("SELECT TOP (2) care_site_id FROM", sql, fixed = TRUE),
+            !grepl("care_site_name|care_site_source_value", sql),
+            identical(columns, c(careSiteId = "integer")))
         stopifnot(grepl(paste0("WHERE care_site_id = ", id), sql, fixed = TRUE))
-        data.frame(careSiteId = id, careSiteName = "fixture name", careSiteSourceValue = "fixture source")
+        if (state$queries == 2L && !is.null(careSiteAnswer)) return(careSiteAnswer)
+        data.frame(careSiteId = id)
     }
     state$operation <- function(label, expr, ...) {
         state$events <- c(state$events, paste(label, "started"))
@@ -66,6 +69,14 @@ stopifnot(fixture$closes == 1L,
 fixture <- make_fixture(failQuery = 3L, failClose = TRUE)
 invisible(expect_error(fixture$run(), "query error"))
 stopifnot(fixture$closes == 1L)
+for (answer in list(data.frame(careSiteId = integer()), data.frame(careSiteId = c(1L, 1L)),
+    data.frame(careSiteId = 2L), data.frame(careSiteId = NA_integer_),
+    data.frame(missingId = 1L), data.frame(careSiteIdentifier = 1L),
+    data.frame(careSiteId = "1"), data.frame(careSiteId = Inf))) {
+    fixture <- make_fixture(careSiteAnswer = answer)
+    invisible(expect_error(fixture$run(), "Expected one non-NULL matching numeric CARE_SITE row"))
+    stopifnot(fixture$queries == 2L, fixture$closes == 1L)
+}
 
 # Use an injected serializer so the atomic receipt contract can be tested in
 # bare R. The production serializer is jsonlite::write_json(auto_unbox=TRUE).
@@ -107,4 +118,4 @@ for (failure in list(list(failQuery = 2L), list(failClose = TRUE))) {
     stopifnot(!file.exists(path))
 }
 unlink(out, recursive = TRUE)
-cat("PASS: explicit disconnect, primary errors preserved, atomic completion receipt, no success receipt on failure\n")
+cat("PASS: ID-only CARE_SITE SQL and strict row/ID validation; explicit disconnect, primary errors preserved, atomic receipt, no success receipt on failure\n")

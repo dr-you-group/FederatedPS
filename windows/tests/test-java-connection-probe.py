@@ -42,9 +42,17 @@ def done(status=0, rows=0):
     return b"\xfd" + struct.pack("<HHQ", status, 0, rows)
 
 
-def col(name, text=False):
-    kind = b"\xe7" + struct.pack("<H", 1024) + bytes.fromhex("0904d00034") if text else b"\x38"
+def col(name, text=False, korean=False):
+    kind = b"\x38"
+    if text:
+        kind = (b"\xa7" if text == "varchar" else b"\xe7") + struct.pack("<H", 1024)
+        kind += bytes.fromhex("1204000000" if korean else "0904d00034")
     return struct.pack("<IH", 0, 0) + kind + bytes([len(name)]) + name.encode("utf-16le")
+
+
+def string_cell(value, encoding="utf-16le"):
+    raw = value.encode(encoding)
+    return struct.pack("<H", len(raw)) + raw
 
 
 def error():
@@ -55,7 +63,7 @@ def error():
     return b"\xaa" + struct.pack("<H", len(body)) + body
 
 
-def run(case, buffering="full"):
+def run(case, buffering="full", mode="care-site-id", text_type="nvarchar"):
     server = socket.socket()
     server.bind(("127.0.0.1", 0))
     server.listen(1)
@@ -84,11 +92,24 @@ def run(case, buffering="full"):
                     queries.append(sql)
                     if sql == "SELECT CAST(1 AS INT) AS ok, @@SPID AS session_id":
                         send(c, b"\x81\x02\x00" + col("ok") + col("session_id") + b"\xd1" + struct.pack("<ii", 1, 77) + done(0x10, 1))
+                    elif sql.startswith("SELECT CAST(1 AS INT) AS probe_id"):
+                        assert mode == "synthetic-text" and "Korean_Wansung_CI_AS" in sql, sql
+                        response = b"\x81\x04\x00" + col("probe_id") + col("ascii_text", "varchar")
+                        response += col("unicode_text", "nvarchar") + col("korean_varchar", "varchar", True)
+                        response += b"\xd1" + struct.pack("<i", 1) + string_cell("FPS_ASCII", "ascii")
+                        response += string_cell("한글") + string_cell("한글", "cp949")
+                        send(c, response + done(0x10, 1))
                     elif sql.startswith("SELECT TOP (2)"):
                         site = int(re.search(r"care_site_id = ([0-9]+)$", sql)[1])
-                        name = "Synthetic 강남".encode("utf-16le")
-                        response = b"\x81\x03\x00" + col("care_site_id") + col("care_site_name", True) + col("care_site_source_value", True)
-                        response += b"\xd1" + struct.pack("<iH", site, len(name)) + name + b"\xff\xff"
+                        if mode == "care-site-id":
+                            assert sql == f"SELECT TOP (2) care_site_id FROM fixture.CDM.CARE_SITE WHERE care_site_id = {site}", sql
+                            response = b"\x81\x01\x00" + col("care_site_id") + b"\xd1" + struct.pack("<i", site)
+                        else:
+                            assert mode == "care-site-text" and "care_site_name, care_site_source_value" in sql, sql
+                            response = b"\x81\x03\x00" + col("care_site_id") + col("care_site_name", text_type, text_type == "varchar")
+                            response += col("care_site_source_value", text_type, text_type == "varchar")
+                            response += b"\xd1" + struct.pack("<i", site)
+                            response += string_cell("Synthetic 강남", "cp949" if text_type == "varchar" else "utf-16le") + b"\xff\xff"
                         if case == "late-error":
                             send(c, response + done(1 | 0x10, 1), False)
                             time.sleep(.05)
@@ -116,7 +137,7 @@ def run(case, buffering="full"):
     packet = "FPS_JAVA_PROBE_V1\n" + "\n".join(x.encode().hex() for x in fields) + "\n"
     begun = time.monotonic()
     result = subprocess.run([JAVA, "--class-path", str(JAR), str(ROOT / "windows/JdbcConnectionProbe.java"),
-        "1", "4", buffering, "1,2,3"], input=packet, text=True, capture_output=True, timeout=12)
+        "1", "4", buffering, "1,2,3", mode], input=packet, text=True, capture_output=True, timeout=12)
     elapsed = time.monotonic() - begun
     worker.join(2)
     assert not failures, failures
@@ -124,11 +145,25 @@ def run(case, buffering="full"):
     assert PASSWORD not in text and USER not in text and "[REDACTED]Secret9" not in text, text
     assert not any("SET ROWCOUNT" in q for q in queries), queries
     assert "SQL_SERVER_SPID=77" in text, text
+    assert "PROBE_MODE=" + mode in text and "JAVA_HEARTBEAT" in result.stderr, text
     if case == "normal":
         assert result.returncode == 0 and "CHECKS_COMPLETE:" in text, text
-        assert [int(re.search(r"care_site_id = ([0-9]+)$", q)[1]) for q in queries if q.startswith("SELECT TOP (2)")] == [1, 2, 3], queries
-        assert text.count("Connection.restoreNetworkTimeout") == 8, text
-        assert text.count("Connection.isClosed") == 8, text
+        expected = [] if mode == "synthetic-text" else [1, 2, 3]
+        assert [int(re.search(r"care_site_id = ([0-9]+)$", q)[1]) for q in queries if q.startswith("SELECT TOP (2)")] == expected, queries
+        count = 4 if mode == "synthetic-text" else 8
+        assert text.count("Connection.restoreNetworkTimeout") == count, text
+        assert text.count("Connection.isClosed") == count, text
+        if mode == "care-site-id":
+            assert "getString" not in text and "getMetaData column" not in text, text
+        elif mode == "synthetic-text":
+            assert "COLUMN_METADATA column=2 jdbc_type=12" in text, text
+            assert "COLUMN_METADATA column=3 jdbc_type=-9" in text, text
+            assert "COLUMN_METADATA column=4 jdbc_type=12" in text, text
+        else:
+            kind = "12" if text_type == "varchar" else "-9"
+            assert "COLUMN_METADATA column=2 jdbc_type=" + kind in text, text
+            assert "DONE CARE_SITE site_id=1 ResultSet.getString row=1 column=2" in text, text
+            assert "DONE CARE_SITE site_id=1 ResultSet.wasNull row=1 column=2" in text, text
     elif case == "late-error":
         assert result.returncode == 2 and "CHECKS_COMPLETE:" not in text, text
         assert text.count("FIRST_FAILURE") == 1, text
@@ -137,12 +172,16 @@ def run(case, buffering="full"):
     else:
         assert result.returncode == 124 and elapsed < 12 and "CHECKS_COMPLETE:" not in text, text
         assert "JAVA_WATCHDOG_TIMEOUT" in text and "JAVA_THREAD_DUMP_BEGIN" in text and "JAVA_THREAD_DUMP_END" in text, text
-    print("PASS", case, buffering, "exit", result.returncode, "seconds", round(elapsed, 2), flush=True)
+        assert "JAVA_WATCHDOG_TIMEOUT_RAW" in result.stderr, text
+    print("PASS", case, mode, text_type, buffering, "exit", result.returncode, "seconds", round(elapsed, 2), flush=True)
 
 
 if __name__ == "__main__":
     run("normal")
     run("normal", "adaptive")
+    run("normal", mode="care-site-text")
+    run("normal", mode="care-site-text", text_type="varchar")
+    run("normal", mode="synthetic-text")
     run("late-error")
     run("stalled")
-    print("PASS: JDK source launch, selected JDBC, same SQL sequence, UTF-8/NULL fetch, terminal errors, private input/redaction, bounded independent watchdog")
+    print("PASS: JDK source launch, selected JDBC, numeric/legacy/synthetic modes, NVARCHAR/CP949/NULL fetch, terminal errors, private input/redaction, raw heartbeat and bounded independent watchdog")

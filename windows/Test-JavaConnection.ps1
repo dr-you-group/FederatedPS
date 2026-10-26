@@ -7,6 +7,7 @@ param([string]$Project='', [string]$InstallRoot='C:\FederatedPS',
       [ValidateRange(1,300)][int]$SmallQueryTimeoutSeconds=60,
       [ValidateRange(15,900)][int]$TimeoutSeconds=180,
       [ValidateSet('full','adaptive')][string]$ResponseBuffering='full',
+      [ValidateSet('care-site-id','care-site-text','synthetic-text')][string]$ProbeMode='care-site-id',
       [string]$OutputDirectory='')
 $ErrorActionPreference='Stop'
 if (-not $Project) { $Project=Join-Path $PSScriptRoot '..' }
@@ -43,6 +44,7 @@ foreach($required in @($source,$exportScript,$java)) {
 $state='failed';$exitCode=$null;$failure=$null;$jar=$null
 $export=$null;$process=$null;$stdoutFile=$null;$stderrFile=$null
 $stdoutTask=$null;$stderrTask=$null;$privatePacket=$null;$privateLines=$null
+$processSamples=New-Object 'System.Collections.Generic.List[object]'
 $started=[DateTime]::UtcNow
 try {
     # Base R reads .Renviron with its own parser. No rJava is loaded. Never save
@@ -77,13 +79,13 @@ try {
     for($i=0;$i -lt $pathBytes.Length;$i++) { $pathBytes[$i]=[Convert]::ToByte($privateLines[1].Substring(2*$i,2),16) }
     $jar=[Text.Encoding]::UTF8.GetString($pathBytes)
     if (-not(Test-Path -LiteralPath $jar -PathType Leaf)) { throw 'The selected JDBC JAR does not exist.' }
-    Write-Host "Independent Java probe: $(Split-Path $jar -Leaf); site_ids=$($SiteIds -join ','); buffering=$ResponseBuffering."
+    Write-Host "Independent Java probe: $(Split-Path $jar -Leaf); mode=$ProbeMode; site_ids=$($SiteIds -join ','); buffering=$ResponseBuffering."
     Write-Host "Logs: $out"
     $process=New-Object Diagnostics.Process
     $process.StartInfo=New-Object Diagnostics.ProcessStartInfo
     $process.StartInfo.FileName=$java
     $arguments=@('--class-path',$jar,$source,[string]$SmallQueryTimeoutSeconds,[string]$TimeoutSeconds,
-        $ResponseBuffering,($SiteIds -join ','))
+        $ResponseBuffering,($SiteIds -join ','),$ProbeMode)
     $process.StartInfo.Arguments=(($arguments | ForEach-Object {ConvertTo-NativeArgument $_}) -join ' ')
     $process.StartInfo.WorkingDirectory=$Project
     $process.StartInfo.UseShellExecute=$false;$process.StartInfo.CreateNoWindow=$true
@@ -109,6 +111,13 @@ try {
     while (-not $process.WaitForExit(200)) {
         $now=[DateTime]::UtcNow
         if (($now-$lastStatus).TotalSeconds -ge 10) {
+            try {
+                $process.Refresh()
+                $cpu=$process.TotalProcessorTime;$threads=$process.Threads;$workingSet=$process.WorkingSet64
+                $processSamples.Add([ordered]@{elapsedSeconds=[Math]::Round(($now-$javaStarted).TotalSeconds,1);
+                    cpuSeconds=if($null -ne $cpu){[Math]::Round($cpu.TotalSeconds,3)}else{$null};
+                    threads=if($null -ne $threads){$threads.Count}else{$null};workingSetBytes=$workingSet})
+            } catch { }
             $last=@(Get-Content -LiteralPath (Join-Path $out 'java.stdout.log') -Tail 1 -Encoding UTF8 -ErrorAction SilentlyContinue)
             Write-Host ("Java probe: {0}s / {1}s outer limit; {2}" -f [Math]::Floor(($now-$javaStarted).TotalSeconds),$outerLimit,($last -join ''))
             $lastStatus=$now
@@ -141,15 +150,16 @@ try {
     foreach($owned in @($process,$export)) { if($null -ne $owned){$owned.Dispose()} }
 }
 $receipt=[ordered]@{state=$state;independentJvm=$true;driverFile=if($jar){Split-Path $jar -Leaf}else{$null};
-    sites=@($SiteIds);responseBuffering=$ResponseBuffering;smallQueryTimeout=$SmallQueryTimeoutSeconds;
+    sites=@($SiteIds);probeMode=$ProbeMode;responseBuffering=$ResponseBuffering;smallQueryTimeout=$SmallQueryTimeoutSeconds;
     totalTimeout=$TimeoutSeconds;exitCode=$exitCode;elapsedSeconds=[Math]::Round(([DateTime]::UtcNow-$started).TotalSeconds,3);
-    failure=$failure;scope='SELECT 1 and bounded CARE_SITE queries only; no cohort extraction'}
+    failure=$failure;processSamples=@($processSamples.ToArray());
+    scope=if($ProbeMode -eq 'synthetic-text'){'SELECT 1 and fixed synthetic strings only; no CDM rows'}else{'SELECT 1 and bounded CARE_SITE queries only; no cohort extraction'}}
 $receipt | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $out 'result.json') -Encoding UTF8
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zip=$out+'.zip'
 [IO.Compression.ZipFile]::CreateFromDirectory($out,$zip,[IO.Compression.CompressionLevel]::Optimal,$true)
 Write-Host "Diagnostic ZIP: $zip"
 if ($state -eq 'passed') {
-    Write-Host 'PASS: independent Java SELECT 1/CARE_SITE checks, explicit disconnect and process exit.' -ForegroundColor Green
+    Write-Host "PASS: independent Java $ProbeMode checks, explicit disconnect and process exit." -ForegroundColor Green
     Write-Host 'This result does not certify the R/rJava path or cohort extraction.'
 } else { throw "Independent Java diagnostic $state. Share the diagnostic ZIP shown above." }

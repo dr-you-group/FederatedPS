@@ -14,6 +14,18 @@
     as.integer(id)
 }
 
+.careSiteIdMetadata <- function(institution, careSiteId) {
+    id <- if (is.data.frame(institution)) institution[["careSiteId"]] else NULL
+    if (!is.data.frame(institution) || nrow(institution) != 1L ||
+        !is.numeric(id) || length(id) != 1L || is.na(id) || !is.finite(id) ||
+        id != careSiteId)
+        stop("Expected one non-NULL matching numeric CARE_SITE row for careSiteId ", careSiteId)
+    # Startup needs only the partition key. Keep the saved metadata fields,
+    # explicitly marking text that was not fetched instead of inventing names.
+    data.frame(careSiteId = as.integer(id), careSiteName = NA_character_,
+        careSiteSourceValue = NA_character_, textMetadataFetched = FALSE)
+}
+
 .validatePatientLimit <- function(limit) {
     if (!is.numeric(limit) || length(limit) != 1L || is.na(limit) || !is.finite(limit) ||
         limit != floor(limit) || limit < 0 || limit == 1 || limit > .Machine$integer.max)
@@ -99,9 +111,9 @@
                                         "; R PID", Sys.getpid()))
     }
     step(0, "CARE_SITE lookup")
-    institution <- query(sprintf("SELECT TOP (2) care_site_id, care_site_name, care_site_source_value FROM %s.CARE_SITE WHERE care_site_id = %d", schema, careSiteId),
-        smallColumns = c(careSiteId = "integer", careSiteName = "character", careSiteSourceValue = "character"))
-    if (nrow(institution) != 1L) stop("Expected one CARE_SITE row for careSiteId ", careSiteId)
+    institution <- query(sprintf("SELECT TOP (2) care_site_id FROM %s.CARE_SITE WHERE care_site_id = %d", schema, careSiteId),
+        smallColumns = c(careSiteId = "integer"))
+    institution <- .careSiteIdMetadata(institution, careSiteId)
     .fpsSetClinicalNetworkTimeout(connection)
     .fpsDbStartupState("Connection self-check and CARE_SITE validation passed", ready = TRUE)
     step(1, "Resolving study concept definitions")

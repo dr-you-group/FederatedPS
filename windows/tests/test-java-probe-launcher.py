@@ -58,7 +58,7 @@ function Stop-FederatedProcessTree($Process) {
         environment["R_DEFAULT_PACKAGES"] = "rJava"
         result = real_run([os.environ["FPS_PWSH"], "-NoLogo", "-NoProfile", "-File",
             str(ROOT / "windows/Test-JavaConnection.ps1"), "-Project", str(project),
-            "-SmallQueryTimeoutSeconds", "1", "-TimeoutSeconds", "15"],
+            "-SmallQueryTimeoutSeconds", "1", "-TimeoutSeconds", "15", "-ProbeMode", argv[-1]],
             text=True, capture_output=True, env=environment, timeout=25)
         archives = list((project / "work/diagnostics").glob("*.zip"))
         assert len(archives) == 1, result.stdout + result.stderr
@@ -68,6 +68,12 @@ function Stop-FederatedProcessTree($Process) {
             texts = {Path(name).name: archive.read(name).decode("utf-8-sig") for name in names}
         receipt = json.loads(texts["result.json"])
         assert receipt["independentJvm"] and receipt["sites"] == [1, 2, 3], receipt
+        assert receipt["probeMode"] == argv[-1], receipt
+        # Process metrics may be unavailable on a host that does not expose its
+        # child process table. Preserve null rather than inventing a zero value.
+        assert receipt["processSamples"] and all(
+            (x["cpuSeconds"] is None or x["cpuSeconds"] >= 0) and
+            (x["threads"] is None or x["threads"] > 0) for x in receipt["processSamples"]), receipt
         assert receipt["state"] == ("passed" if receipt["exitCode"] == 0 else "failed"), receipt
         assert (result.returncode == 0) == (receipt["state"] == "passed"), result.stdout + result.stderr
         all_output = result.stdout + result.stderr + "".join(texts.values())
@@ -78,5 +84,6 @@ function Stop-FederatedProcessTree($Process) {
 
 wire.subprocess = types.SimpleNamespace(run=through_powershell)
 wire.run("normal")
+wire.run("normal", mode="synthetic-text")
 wire.run("late-error")
 print("PASS: actual PowerShell/private base-R/standalone JDBC pipeline, mapping, success/failure receipt, ZIP and no credentials/private packet in outputs")

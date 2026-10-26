@@ -8,7 +8,7 @@ fp_check_names <- function(run_id, sites) {
 
 fp_verify_db_runtime_revision <- function(installedRevision = tryCatch(
         utils::getFromNamespace(".fpsDbRuntimeRevision", "FederatedPs"), error = function(e) NULL)) {
-    if (!identical(installedRevision, "jdbc-probe-4"))
+    if (!identical(installedRevision, "jdbc-probe-5"))
         stop("Installed FederatedPs lacks the JDBC probe fix. Run 10_UPDATE_PACKAGE.ps1 ",
              "(or windows/Update-FederatedPs.ps1), then start a new R process.")
     invisible(TRUE)
@@ -51,7 +51,7 @@ fp_verify_runtime <- function(project, configDirectory = file.path(project, "win
     if (!identical(utils::getFromNamespace(".protocolVersion", "FederatedPs"), lock$protocol))
         stop("FederatedPs protocol differs from runtime-lock.json")
     if (!"ppi" %in% FederatedPs::listStudies()$study) stop("Study metadata missing")
-    cat("PASS: offline R, block Cyclops, FederatedPs, JVM and JDBC [jdbc-probe-4; sql-plan-4]\n")
+    cat("PASS: offline R, block Cyclops, FederatedPs, JVM and JDBC [jdbc-probe-5; sql-plan-4]\n")
     invisible(TRUE)
 }
 

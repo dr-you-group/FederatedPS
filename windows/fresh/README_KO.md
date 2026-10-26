@@ -104,7 +104,11 @@ cd C:\FederatedPS_YUHS_Offline
 .\07_CHECK_DB.ps1
 ```
 
-이 검사는 SELECT 1, 세 기관 CARE_SITE 조회, 연결 종료를 확인합니다.
+이 검사는 SELECT 1, 세 기관 CARE_SITE ID의 존재·유일성·일치 여부, 연결 종료를 확인합니다.
+CARE_SITE 기관명/source value는 계산에 필요하지 않아 읽지 않으며 로컬 메타데이터에는
+NA와 textMetadataFetched=FALSE로 기록합니다. 독립 Java 비교가 필요하면
+`.\CHECK_JDBC.ps1 -BundleRoot $PWD.Path`를 사용합니다. 상세 내용은
+`FederatedPS/windows/JDBC_DIAGNOSTIC_KO.md`를 참고하십시오.
 대용량 임상 쿼리의 실행 시간이나 성공을 보장하는 검사는 아닙니다.
 
 ## 4. 요청한 옵션으로 실행
@@ -151,7 +155,7 @@ SitePartition/CohortMethod 중간 단계만 끝난 상태는 재개 체크포인
 ```
 
 R, Rtools, Java, Cyclops를 다시 설치할 필요가 없습니다. 실행 전 확인에
-`[jdbc-probe-4; sql-plan-4]`가 표시되어야 합니다. 같은 0.0.10이라도 설치된 패키지가 구버전이면
+`[jdbc-probe-5; sql-plan-4]`가 표시되어야 합니다. 같은 0.0.10이라도 설치된 패키지가 구버전이면
 분석을 시작하지 않고 업데이트 명령을 안내합니다.
 
 0단계는 `db-startup-watchdog.log`에 기관별 현재 호출과 경과/제한 시간을 기록합니다.
@@ -287,7 +291,7 @@ R/RStudio는 재설치 전에 닫아 둡니다. 재설치 자체가 실패하면
 APPLY_FIX에 `-InstallRoot '<설치 경로>'`도 전달합니다.
 
 
-## JDBC 경로를 Renviron에서 선택 (jdbc-probe-4)
+## JDBC 경로를 Renviron에서 선택 (jdbc-probe-5)
 
 실제 설정 파일은 `FederatedPS/windows/config/yuhs.Renviron`입니다.
 DBeaver에서 사용하는 JAR이 있는 폴더를 다음처럼 지정할 수 있습니다.

@@ -9,6 +9,7 @@ param(
     [ValidateRange(1,300)][int]$SmallQueryTimeoutSeconds = 60,
     [ValidateRange(15,900)][int]$TimeoutSeconds = 180,
     [ValidateSet('full','adaptive')][string]$ResponseBuffering = 'full',
+    [ValidateSet('care-site-id','care-site-text','synthetic-text')][string]$ProbeMode = 'care-site-id',
     [int[]]$SiteIds,
     [string]$OutputDirectory = ''
 )
@@ -26,7 +27,7 @@ if (-not (Test-Path -LiteralPath $tool -PathType Leaf)) {
 $options = @{
     Project=$project; InstallRoot=$InstallRoot; RHome=$RHome; JavaHome=$JavaHome
     ConfigDirectory=$ConfigDirectory; SmallQueryTimeoutSeconds=$SmallQueryTimeoutSeconds
-    TimeoutSeconds=$TimeoutSeconds; ResponseBuffering=$ResponseBuffering
+    TimeoutSeconds=$TimeoutSeconds; ResponseBuffering=$ResponseBuffering; ProbeMode=$ProbeMode
     OutputDirectory=$OutputDirectory
 }
 if ($PSBoundParameters.ContainsKey('SiteIds')) { $options.SiteIds=$SiteIds }

@@ -55,6 +55,18 @@ stopifnot(java$calls[[2]]$args[[2]] == 75000L, identical(java$calls[[3]]$args, l
           java$calls[[6]]$args[[1]] == sql)
 stopifnot(identical(tail(methods, 4), c("close", "close", "setNetworkTimeout", "isClosed")))
 
+# Production startup requests only the numeric partition key. A driver that
+# fails or blocks in getString must never enter that method for this query.
+idJava <- make_java(data.frame(id = 2L), fail = "getString")
+idResult <- .fpsJdbcSmallQuery("connection",
+    "SELECT TOP (2) care_site_id FROM CDM.CARE_SITE WHERE care_site_id = 2",
+    c(careSiteId = "integer"), 60, idJava$call, "null-executor", function(object, ...) object)
+idMethods <- vapply(idJava$calls, `[[`, "", "method")
+stopifnot(identical(idResult, data.frame(careSiteId = 2L)),
+    "getInt" %in% idMethods, !"getString" %in% idMethods,
+    idJava$row == 2L, idJava$network == 180000L,
+    identical(tail(idMethods, 4), c("close", "close", "setNetworkTimeout", "isClosed")))
+
 for (fail in c("createStatement", "setResponseBuffering", "setQueryTimeout", "executeQuery", "next", "getString", "getMoreResults")) {
     java <- make_java(rows, fail)
     expect_error(.fpsJdbcSmallQuery("connection", sql, columns, 60, java$call, "null-executor", function(object, ...) object), fail)

@@ -1,6 +1,20 @@
 > Fresh 번들 RUN 기본값은 site_id 1/2/3 각각 2명입니다.
 > JDBC close 대기 수정과 연결 검사: [JDBC_PROBE_CLEANUP_KO.md](JDBC_PROBE_CLEANUP_KO.md).
 
+## CARE_SITE 시작 검사 수정 (`jdbc-probe-5`)
+
+실제 추출과 R 연결 점검은 `SELECT TOP (2) care_site_id ...`로 기관 ID만 읽습니다.
+결과가 정확히 한 행이고, NULL이 아닌 숫자 ID가 요청한 기관과 일치해야 진행합니다.
+기관명과 원본 기관코드는 시작 검사에 필요하지 않아 읽지 않습니다. 저장되는
+`careSite` 메타데이터의 `careSiteName`과 `careSiteSourceValue`는 `NA_character_`,
+`textMetadataFetched`는 `FALSE`입니다. 기관 분할과 분석 기준은 동일합니다.
+
+독립 Java 점검은 `getInt` 완료 후 기관명 `getString`에서 마지막 로그를 남겼습니다.
+문자열 읽기 내부 지연의 원인은 아직 확정하지 않았으며, 이번 수정은 불필요한
+시작 단계의 문자열 읽기를 제거합니다. 시간 제한을 늘리거나 자동 재시도하지 않습니다.
+실제 코호트 추출 전체의 성공은 별도로 확인해야 합니다. 적용 후 패키지를 업데이트하고
+새 R 프로세스의 시작 로그에서 `jdbc-probe-5`를 확인하십시오.
+
 # 전처리 우선 실행기 핫픽스 (0.0.10, 2026-10-26)
 
 기본 전처리를 단일 R 프로세스로 변경했습니다. 모든 기관 전처리 후 모델을 실행합니다.

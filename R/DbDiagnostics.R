@@ -1,6 +1,6 @@
 # Diagnostics remain local to the role. They never enter the federated exchange.
 # Callers outside the Windows launcher keep SQL logging and short-query guards off.
-.fpsDbRuntimeRevision <- "jdbc-probe-4"
+.fpsDbRuntimeRevision <- "jdbc-probe-5"
 
 .fpsDiagnosticWrite <- function(name, text, append = FALSE) {
     directory <- getOption("FederatedPs.sqlDiagnosticsDirectory")

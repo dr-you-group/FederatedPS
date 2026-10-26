@@ -1,45 +1,49 @@
-# CARE_SITE JDBC 정지 구간 비교 진단
+# CARE_SITE JDBC 비교 진단 — ID-only 기본값
 
-이 도구는 기존 분석을 수정하는 패치가 아니라, 같은 설정을 독립 Java 프로세스에서 비교하는 진단 도구입니다. R 패키지 재설치, APPLY_FIX, RUN.ps1 변경은 필요하지 않습니다. 인터넷 연결도 필요하지 않습니다.
+현재 설정을 독립 Java 프로세스에서 검사합니다. 이미 설치된 R/JDK/JDBC를 사용하며 인터넷 연결이나 추가 설치가 필요하지 않습니다.
 
-## 이번 로그에서 확인된 점
+## 실제 로그에서 확인한 범위
 
-- 지정한 `mssql-jdbc-7.4.1.jre8.jar`가 실제로 로드되었습니다.
-- 연결 후 `SELECT CAST(1 AS INT) AS ok, @@SPID AS session_id`와 결과 정리가 약 0.38초 만에 완료되었습니다.
-- 다음 `CARE_SITE WHERE care_site_id = 1` 조회의 `Statement.executeQuery` 구간에서 응답이 없어 75초 제한으로 종료되었습니다.
-- 종료 시 수집한 jcmd 출력에는 PID만 있습니다. 스레드 스택이 없으므로 JVM 교착, DB 잠금 또는 HIWARE 문제 중 어느 것인지 확정할 수 없습니다.
+2026-10-26 독립 Java 검사에서도 7.4.1 JDBC, Java 17.0.20.1, encrypt=false가 사용되었습니다. SELECT 1은 성공했고, CARE_SITE 쿼리는 약 6ms에 반환됐으며 첫 행의 숫자 ID도 읽었습니다. 이후 기관명 문자열 읽기 구간에서 응답이 끊겨 외부 제한 195초에 종료됐습니다.
 
-`executeQuery` 표시만으로 SQL Server가 계속 쿼리를 계산 중이라고 판단할 수 없습니다. 현재 작은 조회는 full buffering을 사용하므로 JDBC가 결과 응답 전체를 기다리는 시간도 이 구간에 포함됩니다.
+이전 도구의 해당 구간에는 getString, wasNull, 완료 로그 출력이 함께 포함되어 있었습니다. 따라서 그 로그만으로 내부의 어느 호출이 멈췄는지 확정할 수 없습니다. R/rJava 밖에서도 재현되므로 R만의 문제라고 볼 수 없고, 이번 CARE_SITE 정지는 SQL 실행이 오래 걸린 것으로도 설명되지 않습니다. 내부 감시 로그가 없다는 사실만으로 JVM 교착을 확정할 수도 없습니다.
 
-## 실행
+분석은 기관 ID로 분할되며 CARE_SITE 이름/source value를 계산에 사용하지 않습니다. jdbc-probe-5 분석 패키지와 이 도구의 기본값은 불필요한 문자열을 요청하지 않고 **ID의 존재·유일성·일치 여부를 검증**합니다. 반환된 기관 메타데이터의 이름/source value는 NA, textMetadataFetched=FALSE로 명시됩니다. 이후 대용량 문자열 처리까지 해결됐음을 의미하지는 않습니다.
 
-1. 진행 중인 분석이 있다면 기존 종료 절차로 종료하고, HIWARE 연결을 유지합니다.
-2. 진단 ZIP을 기존 분석 폴더와 별도의 폴더에 압축 해제합니다.
-3. 압축을 푼 폴더에서 64비트 Windows PowerShell을 열고 실행합니다.
+## 기본 실행
+
+HIWARE 로그인 상태를 유지하고, 진단 ZIP을 별도 폴더에 푼 뒤 64비트 Windows PowerShell에서 실행합니다.
 
 ```powershell
 .\CHECK_JDBC.ps1 -BundleRoot 'C:\FP'
 ```
 
-`C:\FP`는 `RUN.ps1`과 `FederatedPS` 폴더가 들어 있는 현재 통합 패키지 경로입니다. 다른 위치에 설치했다면 해당 경로로 바꾸십시오. 런타임 설치 경로가 기본값 `C:\FederatedPS`와 다르면 `-InstallRoot`도 지정하십시오.
+C:\FP는 RUN.ps1과 FederatedPS 폴더가 있는 기존 번들 위치입니다. 런타임 설치 위치가 기본 C:\FederatedPS와 다르면 -InstallRoot를 지정하십시오. 현재 yuhs.Renviron의 주소·계정·SSL·JDBC 경로, yuhs-sites.json의 숫자 ID를 사용합니다. 설정을 읽는 짧은 R 프로세스에는 rJava를 로드하지 않고 실제 조회는 java.exe에서 수행합니다.
 
-진단은 현재 `yuhs.Renviron`의 DB 주소·계정·SSL 설정과 JDBC JAR 경로를 사용합니다. 설정을 읽는 짧은 R 프로세스에서는 rJava를 로드하지 않고, 실제 JDBC 조회는 별도 `java.exe`에서 실행합니다. 현재 설정에 등록된 CARE_SITE_ID를 순서대로 조회합니다.
+기본 검사: SELECT 1/세션 ID → 기관별 SELECT TOP (2) care_site_id → EOF/추가 결과 확인 → 연결 종료 → 프로세스 종료. 실패한 ID를 건너뛰거나 성공으로 처리하지 않습니다.
 
-## 수행 범위와 결과
+## 문자열 문제를 추가로 분리할 때
 
-- 연결, `SELECT 1`/세션 ID, 기관별 `TOP (2)` CARE_SITE 조회, 결과 읽기와 연결 종료를 확인합니다.
-- 코호트 생성, 환자 추출, 임상 테이블 변경, 기존 결과 삭제를 하지 않습니다.
-- 기본 조회 제한은 60초, 네트워크/단계 제한은 75초입니다. 전체 실행도 별도 제한으로 종료합니다.
-- 각 JDBC 호출의 시작·완료와 실패 위치를 기록합니다. Java 내부 감시 스레드가 응답할 수 있으면 timeout 시 스레드 스택도 기록합니다.
-- 사용자명·비밀번호는 명령행과 진단 파일에 기록하지 않습니다. CARE_SITE 이름과 source value는 읽기 동작만 검사하며 값을 출력하지 않습니다. 로그에는 로컬 경로, 드라이버·Java 버전, site_id와 SQL Server 세션 ID 등이 포함됩니다.
-- 성공/실패와 관계없이 콘솔에 결과 ZIP 경로를 표시합니다. 그 ZIP을 전달하면 기존 R 실행 로그와 비교할 수 있습니다.
+실제 임상 데이터 없이 고정 ASCII/Korean 문자열과 코드 페이지를 검사합니다.
 
-## 결과 해석
+```powershell
+.\CHECK_JDBC.ps1 -BundleRoot 'C:\FP' -ProbeMode synthetic-text
+```
 
-| 독립 Java 결과 | 의미와 다음 조사 범위 |
-| --- | --- |
-| 모든 조회와 프로세스 종료 성공 | 같은 JDBC 설정이 독립 Java에서는 작동합니다. R 내장 JVM 또는 프로세스별 환경 차이를 좁혀 조사할 근거이며, rJava 결함이 확정된 것은 아닙니다. |
-| CARE_SITE에서 같은 정지/timeout | R 밖에서도 재현됩니다. 수집된 Java 스택과 오류로 JDBC 응답 대기, 연결/프록시, DB 대기를 구분해야 합니다. |
-| 연결 또는 self-check부터 실패 | 기존 실행과 연결 조건이 달라졌을 수 있습니다. HIWARE 세션, 선택된 설정과 오류를 우선 비교합니다. |
+기존 CARE_SITE 이름/source value 조회를 재현하려면 아래를 별도로 실행합니다. 이미 정지가 관찰된 경로이므로 분석 시작의 필수 검사는 아닙니다.
 
-실제 폐쇄망 DB에서의 수정 효과를 확인한 도구는 아닙니다. timeout을 늘리거나 기관 검증을 건너뛰어 분석을 성공 처리하지 않습니다. 이 진단만으로 기존 `RUN.ps1`의 문제가 자동으로 해결되지는 않습니다.
+```powershell
+.\CHECK_JDBC.ps1 -BundleRoot 'C:\FP' -ProbeMode care-site-text
+```
+
+각 명령은 새 Java 프로세스에서 실행됩니다. 기본값은 -ProbeMode care-site-id, -ResponseBuffering full입니다. 모드를 서로 비교할 때는 같은 설정과 JAR을 사용하십시오.
+
+## 로그와 한계
+
+- getString, wasNull을 별도 기록하고 문자열 읽기 전에 숫자 JDBC column type/precision을 기록합니다. 반환 문자열 값은 출력하지 않습니다.
+- stdout과 별도의 stderr heartbeat/timeout 표식을 사용하고 PowerShell 외부 시간 제한도 적용합니다. 프로세스 CPU·메모리·스레드 관찰값은 결과에 포함됩니다.
+- 사용자명·비밀번호·Renviron 원문은 진단 ZIP에 기록하지 않습니다. 로컬 경로, 버전, site_id, SQL Server 세션 ID는 포함됩니다.
+- 쿼리 제한은 기본 60초, 네트워크/단계 제한은 75초입니다. Java 전체 제한은 180초이며 외부 종료 여유가 추가됩니다. 사전 파일/설정 오류가 아니라 실제 진단이 시작된 경우, 성공·실패 모두 콘솔의 Diagnostic ZIP 경로에 결과를 만듭니다.
+- 코호트/환자 추출이나 임상 테이블 변경을 수행하지 않습니다. ID-only 성공은 기관 검증 성공이며 전체 분석이나 문자열 처리의 성공을 보장하지 않습니다.
+
+실제 YUHS/HIWARE에서 수정 후 성공 여부는 이 도구와 분석을 해당 서버에서 실행하여 확인해야 합니다. 모의 응답 검증과 실제 서버 검증은 구분합니다.
