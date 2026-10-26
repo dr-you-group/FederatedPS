@@ -8,8 +8,8 @@ fp_check_names <- function(run_id, sites) {
 
 fp_verify_db_runtime_revision <- function(installedRevision = tryCatch(
         utils::getFromNamespace(".fpsDbRuntimeRevision", "FederatedPs"), error = function(e) NULL)) {
-    if (!identical(installedRevision, "jdbc-probe-5"))
-        stop("Installed FederatedPs lacks the JDBC probe fix. Run 10_UPDATE_PACKAGE.ps1 ",
+    if (!identical(installedRevision, "dbi-odbc-1"))
+        stop("Installed FederatedPs lacks the ODBC/JDBC connection fix. Run 10_UPDATE_PACKAGE.ps1 ",
              "(or windows/Update-FederatedPs.ps1), then start a new R process.")
     invisible(TRUE)
 }
@@ -21,16 +21,29 @@ fp_verify_sql_plan_revision <- function(installedRevision = tryCatch(
     invisible(TRUE)
 }
 
-fp_verify_runtime <- function(project, configDirectory = file.path(project, "windows", "config")) {
+fp_load_odbc_helpers <- function(project = Sys.getenv("FEDERATEDPS_PROJECT")) {
+    path <- if (nzchar(project)) file.path(project, "windows", "odbc-connection.R") else "windows/odbc-connection.R"
+    if (!file.exists(path)) stop("ODBC connection helpers missing from this checkout")
+    source(path, local = parent.frame())
+    invisible(NULL)
+}
+
+fp_verify_runtime <- function(project,
+        configDirectory = Sys.getenv("FEDERATEDPS_CONFIG_DIRECTORY", unset = file.path(project, "windows", "config")),
+        dbBackend = NULL) {
     lock <- jsonlite::fromJSON(file.path(project, "windows", "runtime-lock.json"))
     if (.Platform$OS.type != "windows" || .Machine$sizeof.pointer != 8L ||
         as.character(getRversion()) != lock$rVersion)
         stop("This deployment requires Windows x64 R ", lock$rVersion)
     lib <- Sys.getenv("FEDERATEDPS_LIBRARY")
     if (!nzchar(lib) || !dir.exists(lib)) stop("Start through the Windows launcher to configure the offline library")
-    fp_configure_jdbc(project, file.path(configDirectory, "yuhs.Renviron"))
+    fp_load_odbc_helpers(project)
+    connectionFile <- file.path(configDirectory, "yuhs.Renviron")
+    backend <- fp_resolve_db_backend(connectionFile, dbBackend)
+    if (backend == "jdbc") fp_configure_jdbc(project, connectionFile)
     packages <- c("FederatedPs", "Cyclops", "CohortMethod", "Andromeda", "DatabaseConnector",
                   "FeatureExtraction", "dplyr", "Matrix", "pda", "rlang", "SqlRender", "rJava")
+    if (backend == "odbc") packages <- c(packages, "odbc", "bit64")
     for (pkg in packages) {
         if (!requireNamespace(pkg, quietly = TRUE)) stop("Missing/unloadable package: ", pkg)
     }
@@ -51,13 +64,20 @@ fp_verify_runtime <- function(project, configDirectory = file.path(project, "win
     if (!identical(utils::getFromNamespace(".protocolVersion", "FederatedPs"), lock$protocol))
         stop("FederatedPs protocol differs from runtime-lock.json")
     if (!"ppi" %in% FederatedPs::listStudies()$study) stop("Study metadata missing")
-    cat("PASS: offline R, block Cyclops, FederatedPs, JVM and JDBC [jdbc-probe-5; sql-plan-4]\n")
+    if (backend == "odbc") {
+        values <- if (file.exists(connectionFile)) fp_odbc_file_values(connectionFile) else list()
+        driver <- values$DB_ODBC_DRIVER
+        if (is.null(driver) || !nzchar(driver)) driver <- "ODBC Driver 18 for SQL Server"
+        fp_odbc_require(driver)
+    }
+    cat("PASS: offline R, block Cyclops, FederatedPs, SQL rendering JVM and", toupper(backend),
+        "[dbi-odbc-1; sql-plan-4]\n")
     invisible(TRUE)
 }
 
 fp_connection_keys <- function() c("PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD",
     "CDM_DATABASE_SCHEMA", "DBMS", "DB_SERVER", "DB_PORT", "DB_DATABASE", "DB_USER", "DB_PASSWORD",
-    "DB_ENCRYPT", "DB_TRUST_SERVER_CERTIFICATE")
+    "DB_ENCRYPT", "DB_TRUST_SERVER_CERTIFICATE", "DB_BACKEND", "DB_ODBC_DRIVER")
 
 fp_read_connection_values <- function(path, yuhs = FALSE) {
     keys <- if (yuhs) c("DBMS", "DB_SERVER", "DB_PORT", "DB_DATABASE", "DB_USER", "DB_PASSWORD", "CDM_DATABASE_SCHEMA") else
@@ -95,8 +115,15 @@ fp_read_connection <- function(path) {
         port = as.integer(values$PGPORT), user = values$PGUSER, password = values$PGPASSWORD)
 }
 
-fp_read_yuhs_connection <- function(path) {
+fp_read_yuhs_connection <- function(path, dbBackend = NULL, loginTimeout = 30) {
+    fp_load_odbc_helpers()
+    backend <- fp_resolve_db_backend(path, dbBackend)
     values <- fp_read_connection_values(path, yuhs = TRUE)
+    if (backend == "odbc") {
+        optional <- c("DB_ENCRYPT", "DB_TRUST_SERVER_CERTIFICATE", "DB_ODBC_DRIVER")
+        values[optional] <- as.list(Sys.getenv(optional))
+        return(fp_odbc_connection_details(values, loginTimeout))
+    }
     tls_value <- function(name, default) {
         value <- tolower(trimws(Sys.getenv(name, unset = default)))
         if (!value %in% c("true", "false")) stop(name, " must be true or false")

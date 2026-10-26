@@ -11,15 +11,15 @@ $exportRoot=Join-Path $PSScriptRoot 'diagnostic-exports'
 $out=Join-Path $exportRoot ($config.runId+'-'+[DateTime]::Now.ToString('yyyyMMdd-HHmmss')+'-'+[guid]::NewGuid().ToString('N').Substring(0,8))
 New-Item -ItemType Directory -Path $out -Force | Out-Null
 $safe=[ordered]@{}
-foreach($key in @('runId','mode','methods','dataset','test','sites','careSites','study','scenario','patientLimits',
+foreach($key in @('runId','mode','methods','dataset','dbBackend','test','sites','careSites','study','scenario','patientLimits',
     'extractionWorkers','requestedExtractionWorkers','connectionCheckTimeout','dbQueryTimeout','runTimeout')) {
     if ($config.PSObject.Properties[$key]) { $safe[$key]=$config.$key }
 }
 $safe | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $out 'run-summary.json') -Encoding UTF8
-$names=@('monitor.log','db-startup-watchdog.log','sql-prepare-watchdog.log','sql-prepare-state.json','progress.jsonl','run.stdout.log','run.stderr.log','operations.tsv','connection.tsv','probe-events.tsv',
+$names=@('monitor.log','db-startup-watchdog.log','sql-prepare-watchdog.log','sql-operation-watchdog.log','sql-prepare-state.json','sql-operation-state.json','progress.jsonl','run.stdout.log','run.stderr.log','operations.tsv','connection.tsv','probe-events.tsv',
     'failure.txt','run-status.json','processes.json','db-startup-start.json','db-startup-ready.json','db-startup-phase.json')
 $files=@(Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object {
-    $_.Name -in $names -or $_.Name -like 'shutdown-thread-*.txt' -or $_.Name -like 'db-startup-timeout-*.json' -or $_.Name -like 'sql-prepare-timeout-*.json' -or
+    $_.Name -in $names -or $_.Name -like 'shutdown-thread-*.txt' -or $_.Name -like 'db-startup-timeout-*.json' -or $_.Name -like 'sql-prepare-timeout-*.json' -or $_.Name -like 'sql-operation-timeout-*.json' -or
     ($_.Directory.Name -eq 'sql-diagnostics' -and ($_.Extension -eq '.sql' -or $_.Name -like '*-plan.tsv')) })
 foreach($file in $files) {
     $relative=$file.FullName.Substring($root.Length).TrimStart('\','/')

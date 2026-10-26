@@ -15,6 +15,11 @@ For native Windows Server execution using the prepared offline R bundle, see
 a no-database smoke test, concurrent Rscript roles, and RStudio Desktop setup.
 Docker and Python are not required for that workflow. The Windows database default is YUHS on SQL Server, partitioned by visit care-site IDs 1/2/3 (Severance, Gangnam, Yongin), with disjoint patients and visit-linked clinical records. The previous PostgreSQL datasets require `-Dataset Example`. See the Korean guide for the distinct exposure/feature definitions and exclusion policy.
 
+For the offline ODBC migration, see [`windows/ODBC_UPDATE_KO.md`](windows/ODBC_UPDATE_KO.md).
+The update's `RUN.ps1` uses ODBC after native and production connection probes
+both exit normally. SQL rendering still uses Java; database I/O uses the native
+Microsoft driver. Existing JDBC entry points remain selectable with `-DbBackend jdbc`.
+
 - R 4.1.0 or newer. Package dependencies are declared in `DESCRIPTION`, including
   the required [Cyclops fork](https://github.com/taseong/Cyclops) pinned to
   a specific commit.

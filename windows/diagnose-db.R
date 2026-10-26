@@ -7,12 +7,12 @@ source(file.path(config$project, "windows", "progress.R"))
 source(file.path(config$project, "windows", "db-runtime.R"))
 source(file.path(config$project, "windows", "diagnostic-checks.R"))
 options(FederatedPs.progress = fp_start_progress(config$output, "diagnostic"))
-fp_verify_runtime(config$project, config$configDirectory)
+fp_verify_runtime(config$project, config$configDirectory, config$dbBackend)
 fp_configure_db_runtime(config, config$output)
 operation <- utils::getFromNamespace(".fpsDbOperation", "FederatedPs")
 smallQuery <- utils::getFromNamespace(".fpsSmallSqlQuery", "FederatedPs")
 details <- fp_prepare_db_connection(fp_read_yuhs_connection(
-    file.path(config$configDirectory, "yuhs.Renviron")), config)
+    file.path(config$configDirectory, "yuhs.Renviron"), dbBackend = config$dbBackend), config)
 checks <- fp_diagnostic_checks(details, config$careSites, Sys.getenv("CDM_DATABASE_SCHEMA"),
     connect = DatabaseConnector::connect, disconnect = DatabaseConnector::disconnect,
     smallQuery = smallQuery, operation = operation)

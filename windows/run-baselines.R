@@ -37,7 +37,7 @@ extract_site <- function(site) {
     } else {
         fp_configure_db_runtime(config, out)
         details <- fp_prepare_db_connection(fp_read_yuhs_connection(
-            file.path(config$configDirectory, "yuhs.Renviron")), config)
+            file.path(config$configDirectory, "yuhs.Renviron"), dbBackend = config$dbBackend), config)
         fp_get_db_study_data(connectionDetails = details,
             cdmDatabaseSchema = Sys.getenv("CDM_DATABASE_SCHEMA"), study = config$study,
             scenario = config$scenario, careSiteId = config$careSites[[site]], patientLimit = patientLimit)
@@ -71,7 +71,7 @@ extract_site <- function(site) {
 
 main <- function() {
     progress("startup", if (is.null(prepareSite)) "Starting selected models" else "Starting isolated site extraction worker")
-    fp_verify_runtime(config$project, config$configDirectory)
+    fp_verify_runtime(config$project, config$configDirectory, config$dbBackend)
     fp_check_names(config$runId, config$sites)
     fp_check_yuhs_sites(config)
     stopifnot(identical(config$mode, "SelectedMethods"), identical(config$dataset, "YUHS"),

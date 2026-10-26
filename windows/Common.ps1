@@ -38,7 +38,7 @@ function Set-FederatedEnvironment {
         throw "Direct x64 Rscript.exe not found: $rscript. Repair the pinned x64 R installation; the bin wrapper is not a safe fallback."
     }
     $jdbc = Join-Path $InstallRoot 'jdbc'
-    foreach ($path in @($base, $rscript, $jdbc)) {
+    foreach ($path in @($base, $rscript)) {
         if (-not (Test-Path -LiteralPath $path)) { throw "Offline prerequisite missing: $path. Complete bundle steps 10-13 first." }
     }
     if ($ForInstall) { New-Item -ItemType Directory -Path $overlay -Force | Out-Null }
@@ -65,6 +65,20 @@ function Set-FederatedEnvironment {
     $env:OPENBLAS_NUM_THREADS = '1'
     $env:MAKEFLAGS = '-j2'
     [pscustomobject]@{ Rscript = $rscript; RHome = $RHome; Library = $overlay; BaseLibrary = $base }
+}
+
+function Invoke-FederatedRuntimeCheck {
+    param($Runtime,[string]$Project,[string]$DbBackend='', [string]$ConfigDirectory='')
+    $oldBackend=[Environment]::GetEnvironmentVariable('FEDERATEDPS_DB_BACKEND','Process')
+    $oldConfig=[Environment]::GetEnvironmentVariable('FEDERATEDPS_CONFIG_DIRECTORY','Process')
+    try {
+        if($DbBackend){$env:FEDERATEDPS_DB_BACKEND=$DbBackend.ToLowerInvariant()}
+        if($ConfigDirectory){$env:FEDERATEDPS_CONFIG_DIRECTORY=[IO.Path]::GetFullPath($ConfigDirectory)}
+        Invoke-FederatedR $Runtime.Rscript @((Join-Path $Project 'windows\verify.R'),$Project)
+    } finally {
+        [Environment]::SetEnvironmentVariable('FEDERATEDPS_DB_BACKEND',$oldBackend,'Process')
+        [Environment]::SetEnvironmentVariable('FEDERATEDPS_CONFIG_DIRECTORY',$oldConfig,'Process')
+    }
 }
 
 function Invoke-FederatedR([string]$Rscript, [string[]]$Arguments) {
@@ -179,9 +193,10 @@ function Start-FederatedWorker {
     }
 }
 
-function Wait-FederatedWorkers([object[]]$Workers, [int]$TimeoutSeconds, $Monitor = $null) {
+function Wait-FederatedWorkers([object[]]$Workers, [int]$TimeoutSeconds, $Monitor = $null, $DbWatchdog = $null) {
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     while ($true) {
+        if ($null -ne $DbWatchdog) { Update-FederatedDbWatchdog $DbWatchdog $Workers }
         if ($null -ne $Monitor) { Update-FederatedMonitor $Monitor $Workers }
         $active = 0
         foreach ($worker in $Workers) {

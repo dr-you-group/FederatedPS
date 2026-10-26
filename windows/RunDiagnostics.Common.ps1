@@ -147,11 +147,24 @@ function Copy-RunDiagnosticFile([string]$Root,[string]$RelativePath,[string]$Des
 }
 
 function Get-RunDiagnosticFiles($Context) {
-    foreach ($name in @('run.json','processes.json','run-status.json','monitor.log','SUCCESS.txt')) {
+    foreach ($name in @('run.json','processes.json','run-status.json','monitor.log','SUCCESS.txt',
+        'failure.txt','db-startup-watchdog.log','sql-prepare-watchdog.log','sql-operation-watchdog.log')) {
         if (Test-Path -LiteralPath (Join-Path $Context.Root $name) -PathType Leaf) { $name }
     }
-    foreach ($role in $Context.Roles) {
-        foreach ($name in @('run.stdout.log','run.stderr.log','progress.jsonl')) {
+    foreach($site in @($Context.Config.sites)) {
+        foreach($prefix in @('db-startup-timeout-','sql-prepare-timeout-','sql-operation-timeout-')) {
+            $name=$prefix+$site+'.json'
+            if(Test-Path -LiteralPath (Join-Path $Context.Root $name) -PathType Leaf){$name}
+        }
+    }
+    $directories=@($Context.Roles)
+    if($Context.Config.PSObject.Properties['mode'] -and $Context.Config.mode -eq 'SelectedMethods') {
+        $directories+=@('baselines')
+        $directories+=@($Context.Config.sites | ForEach-Object {'extraction/'+$_})
+    }
+    foreach ($role in @($directories | Select-Object -Unique)) {
+        foreach ($name in @('run.stdout.log','run.stderr.log','progress.jsonl','db-startup-start.json',
+            'db-startup-ready.json','db-startup-phase.json','sql-prepare-state.json','sql-operation-state.json')) {
             $relative=Join-Path $role $name
             if (Test-Path -LiteralPath (Join-Path $Context.Root $relative) -PathType Leaf) { $relative }
         }

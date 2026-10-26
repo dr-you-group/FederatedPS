@@ -1,6 +1,7 @@
 #Requires -Version 5.1
 [CmdletBinding()]
 param(
+    [ValidateSet('jdbc','odbc')][string]$DbBackend,
     [ValidateSet('local-only','pooled','federated')][string[]]$Methods=@('federated'),
     [ValidateRange(0,2147483647)][int]$PatientLimit=0,
     [hashtable]$PatientLimits=@{},

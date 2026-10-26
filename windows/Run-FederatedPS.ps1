@@ -1,6 +1,7 @@
 #Requires -Version 5.1
 [CmdletBinding()]
 param(
+    [ValidateSet('jdbc','odbc')][string]$DbBackend,
     [ValidateSet('Synthetic','SyntheticCDM','Database','Design')][string]$Mode = 'Synthetic',
     [switch]$NoProgress,
     [ValidateRange(1,3600)][int]$StatusSeconds = 15,
@@ -25,6 +26,7 @@ param(
 )
 . (Join-Path $PSScriptRoot 'Common.ps1')
 . (Join-Path $PSScriptRoot 'Monitor.ps1')
+. (Join-Path $PSScriptRoot 'ConnectionWatchdog.ps1')
 if ($Test) { $Mode = 'SyntheticCDM' }
 if ($Mode -eq 'SyntheticCDM' -and ($Dataset -ne 'YUHS' -or $Study -cne 'ppi' -or $Scenario -ne 'default')) {
     throw 'The synthetic YUHS CDM smoke test requires Dataset=YUHS, Study=ppi, Scenario=default.'
@@ -75,7 +77,7 @@ if ($Mode -eq 'Design') {
         if (-not (Test-Path -LiteralPath (Join-Path $DesignDirectory "$site.rds") -PathType Leaf)) { throw "Missing design for $site." }
     }
 }
-Invoke-FederatedR $runtime.Rscript @((Join-Path $PSScriptRoot 'verify.R'), $project)
+Invoke-FederatedRuntimeCheck -Runtime $runtime -Project $project -DbBackend $DbBackend -ConfigDirectory $ConfigDirectory
 $output = [IO.Path]::GetFullPath((Join-Path $WorkDirectory $RunId))
 $exchange = [IO.Path]::GetFullPath((Join-Path $ExchangeDirectory $RunId))
 if ((Test-Path -LiteralPath $output) -or (Test-Path -LiteralPath $exchange)) {
@@ -97,12 +99,19 @@ $config = [ordered]@{
     configDirectory = [IO.Path]::GetFullPath($ConfigDirectory)
     designDirectory = $(if ($DesignDirectory) { [IO.Path]::GetFullPath($DesignDirectory) } else { '' })
 }
+if($DbBackend){$config['dbBackend']=$DbBackend.ToLowerInvariant()}
 $configFile = Join-Path $output 'run.json'
 # Windows PowerShell's UTF8 encoder adds a BOM; jsonlite input should be BOM-free.
 [IO.File]::WriteAllText($configFile, ($config | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false)))
 Invoke-FederatedR $runtime.Rscript @((Join-Path $PSScriptRoot 'preflight.R'), $configFile)
 $workers = @()
 $monitor = New-FederatedMonitor -RunDirectory $output -Roles (@('aggregator') + $Sites + @('verification')) -NoProgress:$NoProgress -StatusSeconds $StatusSeconds
+$dbWatchdog=$null
+if($Mode -eq 'Database' -and $Dataset -eq 'YUHS'){
+    $dbWatchdog=New-FederatedDbWatchdog -RunDirectory $output -RunId $RunId -Sites $Sites `
+        -TimeoutSeconds 180 -OperationTimeoutSeconds ($SmallQueryTimeoutSeconds+15) `
+        -ClinicalOperationTimeoutSeconds $DbQueryTimeoutSeconds -SiteDirectoryLayout roles
+}
 $runStarted = [DateTime]::UtcNow
 try {
     # Site workers load connection settings themselves. The aggregator must not
@@ -127,7 +136,7 @@ try {
     Write-FederatedProcessMetadata $output $workers
     Write-Host "Run $RunId started. Live logs and status below. Files: $output"
     Write-Host "Timeouts (seconds): initial/feature negotiation=$InitialTimeoutSeconds; exchange=$ExchangeTimeoutSeconds; small DB query=$SmallQueryTimeoutSeconds; bulk DB statement=$DbQueryTimeoutSeconds; whole run=$RunTimeoutSeconds"
-    Wait-FederatedWorkers $workers $RunTimeoutSeconds $monitor
+    Wait-FederatedWorkers $workers $RunTimeoutSeconds $monitor $dbWatchdog
     Write-FederatedMonitorLine $monitor 'All model roles exited successfully. Starting final result verification.'
     $verification = Join-Path $output 'verification'
     New-Item -ItemType Directory -Path $verification | Out-Null

@@ -34,7 +34,19 @@ fp_configure_db_runtime <- function(config, out) {
         driver = as.character(utils::packageVersion("DatabaseConnector"))))
     options(FederatedPs.dbStartupObserver = fp_db_startup_reporter(config, out, site))
     options(FederatedPs.sqlPreparationObserver = fp_sql_preparation_reporter(config, out, site))
+    options(FederatedPs.dbOperationObserver = fp_db_operation_reporter(config, out, site))
     invisible(directory)
+}
+
+fp_db_operation_reporter <- function(config, out, site) {
+    function(operation) {
+        destination <- file.path(out, "sql-operation-state.json")
+        record <- c(list(runId=config$runId, site=site, pid=Sys.getpid()), operation)
+        jsonlite::write_json(record, paste0(destination, ".partial"), auto_unbox=TRUE, pretty=TRUE)
+        if (!file.rename(paste0(destination, ".partial"), destination))
+            stop("Cannot publish SQL operation watchdog marker")
+        invisible(NULL)
+    }
 }
 
 fp_sql_preparation_reporter <- function(config, out, site) {
@@ -101,6 +113,10 @@ fp_db_startup_reporter <- function(config, out, site) {
 
 fp_prepare_db_connection <- function(details, config) {
     if (!identical(details$dbms, "sql server")) return(details)
+    # DBI authentication arguments are passed directly to dbConnect. JDBC
+    # timeout properties must never become unknown ODBC connection keywords.
+    if (inherits(details, "DbiConnectionDetails") ||
+        identical(attr(details, "FederatedPs.dbBackend"), "odbc")) return(details)
     settings <- details$extraSettings
     if (is.null(settings)) settings <- ""
     if (!is.character(settings) || length(settings) != 1L || is.na(settings))

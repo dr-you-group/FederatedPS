@@ -10,13 +10,14 @@ param($Mode,$Dataset,$Methods,[bool]$Test=$true,$BlockSize,$Alpha)
 [pscustomobject]@{mode=$Mode;dataset=$Dataset;methods=$Methods;test=$Test;block=$BlockSize;alpha=$Alpha}
 '@ | Set-Content (Join-Path $temp 'Run-FederatedPS.ps1')
     @'
-param($Methods,[bool]$Test=$true,$BlockSize,$Alpha,$PatientLimit,$PatientLimits,$CacheDirectory,[switch]$RebuildData,$StatusSeconds,$ExtractionWorkers,$ConnectionCheckTimeoutSeconds)
-[pscustomobject]@{mode='SelectedMethods';methods=$Methods;test=$Test;block=$BlockSize;alpha=$Alpha;limit=$PatientLimit;limits=$PatientLimits;cache=$CacheDirectory;rebuild=[bool]$RebuildData;status=$StatusSeconds;workers=$ExtractionWorkers;connectionTimeout=$ConnectionCheckTimeoutSeconds}
+param($DbBackend,$Methods,[bool]$Test=$true,$BlockSize,$Alpha,$PatientLimit,$PatientLimits,$CacheDirectory,[switch]$RebuildData,$StatusSeconds,$ExtractionWorkers,$ConnectionCheckTimeoutSeconds)
+[pscustomobject]@{backend=$DbBackend;mode='SelectedMethods';methods=$Methods;test=$Test;block=$BlockSize;alpha=$Alpha;limit=$PatientLimit;limits=$PatientLimits;cache=$CacheDirectory;rebuild=[bool]$RebuildData;status=$StatusSeconds;workers=$ExtractionWorkers;connectionTimeout=$ConnectionCheckTimeoutSeconds}
 '@ | Set-Content (Join-Path $temp 'Run-YUHS-Methods.ps1')
     $run=Join-Path $temp 'Run-YUHS.ps1'
     $default=& $run
     if($default.workers -ne 1){throw 'Default sequential preprocessing was not forwarded'}
     if($default.mode -ne 'SelectedMethods' -or -not $default.test -or ($default.methods -join ',') -ne 'federated'){throw 'Default selection broken'}
+    if((& $run -DbBackend odbc).backend -cne 'odbc'){throw 'ODBC backend option lost'}
     foreach($selection in @('local-only','pooled','federated','local-only,pooled','local-only,federated','pooled,federated','local-only,pooled,federated')){
         $m=$selection.Split(',');$r=& $run -Methods $m -Test $false -BlockSize 4 -Alpha 0.5 -PatientLimit 200 -PatientLimits @{2=100;3=300} -CacheDirectory 'fixture-cache' -RebuildData -StatusSeconds 10 -ExtractionWorkers 3
         if($r.workers -ne 3){throw 'Parallel worker count lost'}

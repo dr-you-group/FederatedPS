@@ -1,6 +1,26 @@
 # Diagnostics remain local to the role. They never enter the federated exchange.
 # Callers outside the Windows launcher keep SQL logging and short-query guards off.
-.fpsDbRuntimeRevision <- "jdbc-probe-5"
+.fpsDbRuntimeRevision <- "dbi-odbc-1"
+
+.fpsNativeConnectionError <- function(error, details) {
+    # Native driver conditions can carry the evaluated dbConnect(uid, pwd)
+    # call. Keep useful SQLSTATE/driver text while removing the attached call
+    # and either plain or ODBC-quoted credentials from the displayed message.
+    message <- conditionMessage(error)
+    for (key in c("uid", "pwd", "UID", "PWD", "user", "password")) {
+        value <- details[[key]]
+        if (!is.character(value) || length(value) != 1L || is.na(value) || !nzchar(value)) next
+        candidates <- as.character(value)
+        if (startsWith(value, "{") && endsWith(value, "}"))
+            candidates <- c(candidates, gsub("}}", "}", substr(value, 2L, nchar(value) - 1L), fixed = TRUE))
+        for (quote in c("'", '"')) if (startsWith(value, quote) && endsWith(value, quote))
+            candidates <- c(candidates, gsub(paste0(quote, quote), quote,
+                substr(value, 2L, nchar(value) - 1L), fixed = TRUE))
+        for (secret in unique(candidates[nzchar(candidates)]))
+            message <- paste(strsplit(message, secret, fixed = TRUE)[[1L]], collapse = "[redacted]")
+    }
+    simpleError(message, call = NULL)
+}
 
 .fpsDiagnosticWrite <- function(name, text, append = FALSE) {
     directory <- getOption("FederatedPs.sqlDiagnosticsDirectory")
@@ -45,6 +65,8 @@
             if (is.function(observer)) observer(c(info, list(label = label)))
         }
         if (!is.null(statement)) info$statementsCompleted <- statement$statementIndex - as.integer(status != "completed")
+        observer <- getOption("FederatedPs.dbOperationObserver")
+        if (is.function(observer)) observer(c(info, list(label = label, stage = stage)))
         .fpsProgress(stage, detail, completed, total, unit, operation = info)
         .fpsDiagnosticWrite("operations.tsv", paste(
             format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"), Sys.getpid(),
@@ -54,7 +76,10 @@
     result <- tryCatch(force(expr), error = function(e) {
         # Keep the original error (including its class/call) for the role's stderr.
         # The event journal itself contains neither result rows nor credentials.
-        emit("failed")
+        # A failed watchdog-marker write must stop successful work, but must
+        # not replace an earlier SQL exception while reporting its failure.
+        tryCatch(emit("failed"), error = function(reportError)
+            message("SQL operation reporting failed; preserving the original operation error."))
         stop(e)
     })
     emit("completed", result)
@@ -178,6 +203,11 @@
 # use its longer deadline. No timeout change is sent as SQL.
 .fpsSetClinicalNetworkTimeout <- function(connection, jcall = rJava::.jcall,
         nullExecutor = rJava::.jnull("java/util/concurrent/Executor")) {
+    # ODBC does not expose JDBC's socket timeout. Its dbConnect(timeout=)
+    # bounds login only; the Windows parent supervises startup and extraction.
+    # Return before evaluating the lazy rJava defaults on a native DBI path.
+    if (methods::is(connection, "DatabaseConnectorDbiConnection"))
+        return(invisible(NULL))
     timeout <- getOption("FederatedPs.clinicalNetworkTimeoutMillis")
     if (is.null(timeout)) return(invisible(NULL))
     if (length(timeout) != 1L || !is.numeric(timeout) || is.na(timeout) ||
@@ -190,14 +220,113 @@
     invisible(NULL)
 }
 
+.fpsDbiSmallQueryApi <- function() {
+    list(send = DBI::dbSendQuery, fetch = DBI::dbFetch,
+         done = DBI::dbHasCompleted, clear = DBI::dbClearResult,
+         valid = DBI::dbIsValid)
+}
+
+# Native ODBC/DBI startup queries use the SAME physical session as extraction.
+# Only server-bounded SELECT 1 / @@SPID / TOP (2) CARE_SITE reach this function.
+# This is a row bound, not an ODBC query deadline: the process supervisor is
+# responsible for a stuck send, fetch, cleanup or process exit.
+.fpsDbiSmallQuery <- function(connection, sql, columns, timeout,
+                              api = .fpsDbiSmallQueryApi()) {
+    .fpsSmallQueryTimeout(timeout)
+    if (!is.character(columns) || !length(columns) || is.null(names(columns)) ||
+        anyNA(columns) || anyNA(names(columns)) || any(!nzchar(names(columns))) ||
+        anyDuplicated(names(columns)) || any(!columns %in% c("integer", "character")))
+        stop("Expected named integer/character small-query columns")
+    label <- if (identical(names(columns), c("ok", "sessionId"))) "Connection self-check" else "CARE_SITE lookup"
+    result <- NULL
+    fetched <- 0L
+    exhausted <- FALSE
+    firstFailure <- NULL
+    journal <- function(phase, status) {
+        .fpsDiagnosticWrite("probe-events.tsv", paste(
+            format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC"), Sys.getpid(),
+            phase, status, fetched, exhausted,
+            if (is.null(firstFailure)) "" else firstFailure, sep = "\t"), append = TRUE)
+    }
+    call <- function(method, ...) {
+        methodName <- c(send = "dbSendQuery", fetch = "dbFetch", done = "dbHasCompleted",
+                        clear = "dbClearResult", valid = "dbIsValid")[[method]]
+        phase <- paste0(label, ": DBI ", methodName,
+            if (identical(method, "clear")) " (resource cleanup)" else "")
+        .fpsDbStartupState(phase)
+        journal(phase, "started")
+        value <- tryCatch(.fpsDbOperation(phase, api[[method]](...), completed = 0),
+            error = function(e) {
+                if (is.null(firstFailure)) {
+                    firstFailure <<- phase
+                    journal(phase, "first-failure")
+                } else journal(phase, "cleanup-failure")
+                stop(e)
+            })
+        journal(phase, "completed")
+        value
+    }
+    completed <- FALSE
+    on.exit({
+        if (!is.null(result)) {
+            cleanup <- function() {
+                if (!isTRUE(call("clear", result))) stop("DBI result cleanup did not succeed")
+                if (completed && !isTRUE(call("valid", connection)))
+                    stop("DBI connection closed during probe cleanup")
+            }
+            if (completed) cleanup() else try(cleanup(), silent = TRUE)
+        }
+    })
+    result <- call("send", connection, sql)
+    rows <- list()
+    repeat {
+        # Fetch at most one excess row to detect an incorrectly unbounded SQL
+        # statement. Read through EOF, including a final empty driver batch.
+        batch <- call("fetch", result, n = as.integer(3L - fetched))
+        if (!is.data.frame(batch) || ncol(batch) != length(columns))
+            stop("Unexpected columns in small DBI query")
+        fetched <- fetched + nrow(batch)
+        if (fetched > 2L) stop("Small DBI probe returned more than two rows; expected server-bounded SQL")
+        names(batch) <- names(columns)
+        for (i in seq_along(columns)) {
+            value <- batch[[i]]
+            if (columns[[i]] == "integer") {
+                if (inherits(value, "integer64")) {
+                    value <- as.character(value)
+                    if (any(!is.na(value) & !grepl("^-?[0-9]+$", value)))
+                        stop("Non-integer value in small DBI query")
+                    value <- suppressWarnings(as.numeric(value))
+                } else if (!is.numeric(value)) stop("Non-numeric value in small DBI query")
+                if (any(!is.na(value) & (!is.finite(value) | value != floor(value) |
+                        value < -.Machine$integer.max | value > .Machine$integer.max)))
+                    stop("Integer out of range in small DBI query")
+                batch[[i]] <- as.integer(value)
+            } else {
+                if (!is.character(value)) stop("Non-character value in small DBI query")
+            }
+        }
+        rows[[length(rows) + 1L]] <- batch
+        exhausted <- isTRUE(call("done", result))
+        if (exhausted) break
+        if (!nrow(batch)) stop("DBI returned an empty batch before completion")
+    }
+    answer <- do.call(rbind, rows)
+    rownames(answer) <- NULL
+    completed <- TRUE
+    answer
+}
+
 .fpsSmallSqlQuery <- function(connection, sql, columns) {
     timeout <- getOption("FederatedPs.smallQueryTimeoutSeconds")
     if (is.null(timeout))
         return(.fpsQuerySqlServer(connection, sql))
-    if (!methods::is(connection, "DatabaseConnectorJdbcConnection"))
-        stop("Bounded SQL Server checks require DatabaseConnector's JDBC connection")
+    jdbc <- methods::is(connection, "DatabaseConnectorJdbcConnection")
+    dbi <- methods::is(connection, "DatabaseConnectorDbiConnection")
+    if (!jdbc && !dbi)
+        stop("SQL Server checks require a DatabaseConnector JDBC or DBI connection")
     timeout <- .fpsSmallQueryTimeout(timeout)
-    tryCatch(.fpsJdbcSmallQuery(connection@jConnection, sql, columns, timeout),
+    tryCatch(if (jdbc) .fpsJdbcSmallQuery(connection@jConnection, sql, columns, timeout)
+        else .fpsDbiSmallQuery(connection, sql, columns, timeout),
         error = function(e) stop(structure(list(message = conditionMessage(e),
             call = conditionCall(e), cause = e),
             class = c("fps_small_query_error", "error", "condition"))))

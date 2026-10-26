@@ -1,7 +1,8 @@
 #' Prepare a named study from an OMOP CDM
 #'
 #' @param connectionDetails A [DatabaseConnector::createConnectionDetails()]
-#'   object for PostgreSQL, or SQL Server for a care-site partition.
+#'   object for PostgreSQL, or SQL Server for a care-site partition. SQL Server
+#'   also accepts [DatabaseConnector::createDbiConnectionDetails()] with ODBC.
 #' @param cdmDatabaseSchema Unquoted CDM schema name containing clinical and
 #'   vocabulary tables. SQL Server also accepts `database.schema`.
 #' @param study Name from [listStudies()].
@@ -47,21 +48,41 @@ getDbStudyData <- function(connectionDetails, cdmDatabaseSchema, study = "opioid
     .validateCdmSchema(cdmDatabaseSchema)
     sqlPlan <- if (identical(connectionDetails$dbms, "sql server"))
         .fpsGetCareSiteSqlPlan(cdmDatabaseSchema, settings, careSiteId, patientLimit) else NULL
-    .fpsDbStartupState("Opening JDBC database connection")
+    .fpsDbStartupState("Opening database connection")
     .fpsProgress("connecting", "Opening database connection")
     connection <- .fpsDbOperation("Opening database connection",
-        DatabaseConnector::connect(connectionDetails), stage = "connecting")
+        tryCatch(DatabaseConnector::connect(connectionDetails), error = function(e) {
+            if (inherits(connectionDetails, "DbiConnectionDetails") ||
+                identical(attr(connectionDetails, "FederatedPs.dbBackend"), "odbc"))
+                stop(.fpsNativeConnectionError(e, connectionDetails))
+            stop(e)
+        }), stage = "connecting")
     # A timeout can already have closed JDBC. Cleanup must not replace the
     # original classified probe error. The Windows launcher does not retry it.
-    on.exit(try({
-        .fpsDbStartupState("Closing JDBC database connection")
-        DatabaseConnector::disconnect(connection)
-    }, silent = TRUE), add = TRUE)
-    .fpsDbStartupState("JDBC connected; identifying database platform")
+    extractionComplete <- FALSE
+    on.exit({
+        cleanup <- function() {
+            .fpsDbStartupState("Closing database connection")
+            .fpsDbOperation("Closing database connection",
+                {
+                    DatabaseConnector::disconnect(connection)
+                    # DatabaseConnector's DBI wrapper always returns TRUE.
+                    # Verify that the underlying native connection closed.
+                    if (methods::is(connection, "DatabaseConnectorDbiConnection") &&
+                        !isFALSE(DBI::dbIsValid(connection)))
+                        stop("Native DBI connection remained valid after disconnect")
+                    invisible(TRUE)
+                }, stage = "disconnecting")
+        }
+        if (extractionComplete) cleanup() else try(cleanup(), silent = TRUE)
+    }, add = TRUE)
+    .fpsDbStartupState("Connected; identifying database platform")
     .fpsProgress("connected", "Database connection established")
     dbms <- DatabaseConnector::dbms(connection)
     if (identical(dbms, "sql server")) {
-        return(.getCareSiteStudyData(connection, cdmDatabaseSchema, settings, careSiteId, patientLimit, sqlPlan))
+        data <- .getCareSiteStudyData(connection, cdmDatabaseSchema, settings, careSiteId, patientLimit, sqlPlan)
+        extractionComplete <- TRUE
+        return(data)
     }
     if (patientLimit > 0L) stop("patientLimit is supported only for SQL Server care-site studies")
     if (!identical(dbms, "postgresql") || !is.null(careSiteId) ||
@@ -178,5 +199,6 @@ getDbStudyData <- function(connectionDetails, cdmDatabaseSchema, study = "opioid
     class(data) <- "CohortMethodData"
     attr(class(data), "package") <- "CohortMethod"
     complete <- TRUE
+    extractionComplete <- TRUE
     data
 }

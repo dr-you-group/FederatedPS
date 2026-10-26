@@ -1,6 +1,7 @@
 #Requires -Version 5.1
 [CmdletBinding()]
 param(
+    [ValidateSet('jdbc','odbc')][string]$DbBackend,
     [ValidateSet('local-only','pooled','federated')][string[]]$Methods=@('local-only','pooled'),
     [ValidateRange(0,2147483647)][int]$PatientLimit=0,
     [hashtable]$PatientLimits=@{},
@@ -74,7 +75,7 @@ if(-not $Test -and -not (Test-Path -LiteralPath (Join-Path $ConfigDirectory 'yuh
     throw 'Test=false requires the existing yuhs.Renviron and authorized HIWARE connection.'
 }
 $runtime=Set-FederatedEnvironment -InstallRoot $InstallRoot -RHome $RHome -JavaHome $JavaHome
-Invoke-FederatedR $runtime.Rscript @((Join-Path $PSScriptRoot 'verify.R'),$project)
+Invoke-FederatedRuntimeCheck -Runtime $runtime -Project $project -DbBackend $DbBackend -ConfigDirectory $ConfigDirectory
 $out=[IO.Path]::GetFullPath((Join-Path $WorkDirectory $RunId))
 if(Test-Path -LiteralPath $out){throw 'Run directory already exists. Choose a new RunId; results are never overwritten.'}
 New-Item -ItemType Directory -Path $WorkDirectory -Force | Out-Null
@@ -91,12 +92,14 @@ $config=[ordered]@{project=$project; runId=$RunId; mode='SelectedMethods'; metho
     dbQueryTimeout=$DbQueryTimeoutSeconds; runTimeout=$RunTimeoutSeconds; shutdownTimeout=$ShutdownTimeoutSeconds;
     output=$out; configDirectory=[IO.Path]::GetFullPath($ConfigDirectory);
     federatedOutput=(Join-Path (Join-Path $out 'federated-runtime') $RunId)}
+if($DbBackend){$config['dbBackend']=$DbBackend.ToLowerInvariant()}
 $configFile=Join-Path $out 'run.json'
 [IO.File]::WriteAllText($configFile,($config | ConvertTo-Json -Depth 5),(New-Object Text.UTF8Encoding($false)))
 $roles=if($effectiveWorkers -gt 1){@($sites)+@('baselines')}else{@('baselines')}
 $workers=@();$monitor=New-FederatedMonitor -RunDirectory $out -Roles $roles -NoProgress:$NoProgress -Sites $sites -SiteLabels $siteLabels -StatusSeconds $StatusSeconds
 $dbWatchdog=New-FederatedDbWatchdog -RunDirectory $out -RunId $RunId -Sites $sites -TimeoutSeconds $ConnectionCheckTimeoutSeconds `
-    -OperationTimeoutSeconds ($SmallQueryTimeoutSeconds+15) -StatusSeconds $StatusSeconds
+    -OperationTimeoutSeconds ($SmallQueryTimeoutSeconds+15) -StatusSeconds $StatusSeconds `
+    -ClinicalOperationTimeoutSeconds $DbQueryTimeoutSeconds
 try {
     $limitText=($sites | ForEach-Object {$_+'='+$resolvedLimits[$_]}) -join ', '
     Write-Host "Methods=$($Methods -join ','); Test=$Test; PatientLimits: $limitText (0=all); ExtractionWorkers=$effectiveWorkers; site queue: $($sites -join ' -> '); RebuildData=$RebuildData. Output: $out"
@@ -153,6 +156,8 @@ try {
             InitialTimeoutSeconds=$InitialTimeoutSeconds;RunTimeoutSeconds=$remaining;
             DesignDirectory=(Join-Path $out 'prepared');WorkDirectory=(Join-Path $out 'federated-runtime');
             InstallRoot=$InstallRoot;RHome=$RHome;JavaHome=$JavaHome;NoProgress=$NoProgress;StatusSeconds=$StatusSeconds}
+        if($DbBackend){$fed['DbBackend']=$DbBackend}
+        $fed['ConfigDirectory']=$ConfigDirectory
         if($ExchangeDirectory){$fed['ExchangeDirectory']=$ExchangeDirectory}
         & (Join-Path $PSScriptRoot 'Run-FederatedPS.ps1') @fed
         $remaining=$RunTimeoutSeconds-[int]([DateTime]::UtcNow-$started).TotalSeconds

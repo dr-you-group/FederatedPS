@@ -1,8 +1,8 @@
 # Policy regression: TLS preservation, timeout routing and no automatic retry.
 source("windows/db-runtime.R")
 source("windows/common.R")
-stopifnot(fp_verify_db_runtime_revision("jdbc-probe-5"))
-for (revision in list(NULL,"jdbc-probe-1","jdbc-probe-2","jdbc-probe-3","jdbc-probe-4","0.0.10"))
+stopifnot(fp_verify_db_runtime_revision("dbi-odbc-1"))
+for (revision in list(NULL,"jdbc-probe-1","jdbc-probe-2","jdbc-probe-3","jdbc-probe-4","jdbc-probe-5","0.0.10"))
     stopifnot(inherits(try(fp_verify_db_runtime_revision(revision),silent=TRUE),"try-error"))
 stopifnot(fp_verify_sql_plan_revision("sql-plan-4"))
 for (revision in list(NULL,"sql-plan-2","sql-plan-3","0.0.10"))
@@ -31,6 +31,14 @@ sqlState <- jsonlite::fromJSON(file.path(out,"sql-prepare-state.json"))
 stopifnot(sqlState$runId=="fixtureRun",sqlState$pid==Sys.getpid(),sqlState$site=="17",sqlState$status=="started")
 sqlReport(list(id="render1",status="completed",startedUtc="2026-10-26T00:00:00Z",label="Rendering"))
 stopifnot(jsonlite::fromJSON(file.path(out,"sql-prepare-state.json"))$status=="completed")
+operationReport <- fp_db_operation_reporter(list(runId="fixtureRun"),out,"17")
+operationReport(list(id="query1",status="started",startedUtc="2026-10-26T00:00:00Z",label="ODBC fetch",stage="extracting"))
+operationState <- jsonlite::fromJSON(file.path(out,"sql-operation-state.json"))
+stopifnot(operationState$runId=="fixtureRun",operationState$pid==Sys.getpid(),
+    operationState$site=="17",operationState$id=="query1",operationState$status=="started")
+operationReport(list(id="query1",status="completed",startedUtc="2026-10-26T00:00:00Z",label="ODBC fetch",stage="extracting"))
+stopifnot(jsonlite::fromJSON(file.path(out,"sql-operation-state.json"))$status=="completed",
+    !file.exists(file.path(out,"sql-operation-state.json.partial")))
 unlink(out,recursive=TRUE)
 d <- list(dbms = "sql server", extraSettings =
     "databaseName=fixture;encrypt=false;trustServerCertificate=false;queryTimeout=9;socketTimeout=0;selectMethod=cursor;responseBuffering=full")

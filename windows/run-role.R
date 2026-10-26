@@ -10,7 +10,7 @@ progress <- function(stage, detail = "") utils::getFromNamespace(".fpsProgress",
 source(file.path(config$project, "windows", "common.R"))
 source(file.path(config$project, "windows", "db-runtime.R"))
 progress("startup", "Checking offline runtime")
-fp_verify_runtime(config$project, config$configDirectory)
+fp_verify_runtime(config$project, config$configDirectory, config$dbBackend)
 fp_check_names(config$runId, config$sites)
 stopifnot(role %in% c("aggregator", config$sites))
 Sys.setenv(PDA_DIR = config$exchange, FEDERATEDPS_SITE = role,
@@ -40,7 +40,7 @@ if (role == "aggregator") {
             FederatedPs::getSyntheticYuhsStudyData(config$careSites[[role]], config$study, config$scenario)
         } else {
             fp_configure_db_runtime(config, out)
-            connection <- if (yuhs) fp_read_yuhs_connection(file.path(config$configDirectory, "yuhs.Renviron")) else
+            connection <- if (yuhs) fp_read_yuhs_connection(file.path(config$configDirectory, "yuhs.Renviron"), dbBackend = config$dbBackend) else
                 fp_read_connection(file.path(config$configDirectory, paste0(role, ".Renviron")))
             connection <- fp_prepare_db_connection(connection, config)
             fp_get_db_study_data(connectionDetails = connection,

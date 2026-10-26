@@ -15,7 +15,8 @@ getDbStudyData(
 }
 \arguments{
 \item{connectionDetails}{A \code{\link[DatabaseConnector:createConnectionDetails]{DatabaseConnector::createConnectionDetails()}}
-object for PostgreSQL, or SQL Server for a care-site partition.}
+object for PostgreSQL, or SQL Server for a care-site partition. SQL Server
+also accepts \code{\link[DatabaseConnector:createDbiConnectionDetails]{DatabaseConnector::createDbiConnectionDetails()}} with ODBC.}
 
 \item{cdmDatabaseSchema}{Unquoted CDM schema name containing clinical and
 vocabulary tables. SQL Server also accepts \code{database.schema}.}

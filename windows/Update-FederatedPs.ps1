@@ -1,7 +1,8 @@
 #Requires -Version 5.1
 <# Update only the pure-R FederatedPs package; reuse Cyclops and all dependencies. #>
 [CmdletBinding()]
-param([string]$InstallRoot='C:\FederatedPS', [string]$RHome='C:\Program Files\R\R-4.6.1', [string]$JavaHome='')
+param([string]$InstallRoot='C:\FederatedPS', [string]$RHome='C:\Program Files\R\R-4.6.1', [string]$JavaHome='',
+    [ValidateSet('jdbc','odbc')][string]$DbBackend)
 . (Join-Path $PSScriptRoot 'Common.ps1')
 $sessionId=(Get-Process -Id $PID).SessionId
 $busy=@(Get-Process -Name R,Rgui,Rterm,Rscript,rsession -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $sessionId })
@@ -11,8 +12,10 @@ if ($busy.Count) {
 }
 $runtime=Set-FederatedEnvironment -InstallRoot $InstallRoot -RHome $RHome -JavaHome $JavaHome
 $project=Get-FederatedProject
-. (Join-Path $PSScriptRoot 'Install-Jdbc.ps1')
-Install-FederatedJdbc -InstallRoot $InstallRoot
+if($DbBackend -ne 'odbc'){
+    . (Join-Path $PSScriptRoot 'Install-Jdbc.ps1')
+    Install-FederatedJdbc -InstallRoot $InstallRoot
+}
 Invoke-FederatedR $runtime.Rscript @((Join-Path $PSScriptRoot 'update-package.R'),$project,$runtime.Library)
-Invoke-FederatedR $runtime.Rscript @((Join-Path $PSScriptRoot 'verify.R'),$project)
-Write-Host 'PASS: FederatedPs updated. JDBC follows yuhs.Renviron (bundled default: 7.4.1); Cyclops and R dependencies were not rebuilt.'
+Invoke-FederatedRuntimeCheck -Runtime $runtime -Project $project -DbBackend $DbBackend
+Write-Host 'PASS: FederatedPs updated. Cyclops and existing R dependencies were not rebuilt.'

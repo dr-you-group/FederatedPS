@@ -11,7 +11,7 @@ fp_data_contract <- function(config, runtimeVersions = NULL, site = NULL) {
         c("FederatedPs", "CohortMethod", "Andromeda", "DatabaseConnector"),
         function(p) as.character(utils::packageVersion(p)), "")
     project <- config$project
-    files <- c("DESCRIPTION", "windows/common.R", "windows/db-runtime.R",
+    files <- c("DESCRIPTION", "windows/common.R", "windows/db-runtime.R", "windows/odbc-connection.R",
         "windows/run-baselines.R", "windows/baseline-models.R", "windows/data-cache.R",
         paste0("R/", list.files(file.path(project,"R"), pattern="[.]R$", full.names=FALSE)))
     # Explicit relative paths keep keys independent of a bundle's disk location.

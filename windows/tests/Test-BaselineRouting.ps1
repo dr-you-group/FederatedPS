@@ -13,6 +13,7 @@ function Get-FederatedProject {$PSScriptRoot}
 function Assert-FederatedNames {param($RunId,$Sites)}
 function Set-FederatedEnvironment {param($InstallRoot,$RHome,$JavaHome);$env:JAVA_HOME=$PSScriptRoot;@{Rscript='unused'}}
 function Invoke-FederatedR {param($Rscript,$Arguments)}
+function Invoke-FederatedRuntimeCheck {param($Runtime,$Project,$DbBackend,$ConfigDirectory)}
 function Start-FederatedRWorker {param($Runtime,$Script,$Arguments,$WorkingDirectory,$LogPrefix,$Role)
     $c=Get-Content $Arguments[0] -Raw | ConvertFrom-Json
     if($Role -eq 'baselines'){
@@ -52,7 +53,7 @@ function Wait-FederatedWorkers {param($Workers,$TimeoutSeconds,$Monitor)
 function Stop-FederatedWorkers {param($Workers)}
 '@ | Set-Content (Join-Path $temp 'Common.ps1')
     @'
-param($Mode,$Dataset,$Sites,$RunId,$Study,$Scenario,$BlockSize,$Alpha,$Tolerance,$ExchangeTimeoutSeconds,$InitialTimeoutSeconds,$RunTimeoutSeconds,$DesignDirectory,$WorkDirectory,$InstallRoot,$RHome,$JavaHome,[switch]$NoProgress,$ExchangeDirectory,[bool]$Test=$false)
+param($DbBackend,$ConfigDirectory,$Mode,$Dataset,$Sites,$RunId,$Study,$Scenario,$BlockSize,$Alpha,$Tolerance,$ExchangeTimeoutSeconds,$InitialTimeoutSeconds,$RunTimeoutSeconds,$DesignDirectory,$WorkDirectory,$InstallRoot,$RHome,$JavaHome,[switch]$NoProgress,$ExchangeDirectory,[bool]$Test=$false)
 if($Mode -ne 'Design' -or $Test){throw 'Federation must use prepared data, never re-extract'}
 foreach($site in $Sites){if((Get-Content (Join-Path $DesignDirectory "$site.rds") -Raw).Trim() -ne 'same extracted input'){throw 'Wrong prepared design'}}
 if($Study -eq 'fixtureFedFail'){throw 'Federated native failure'}
@@ -82,6 +83,10 @@ function Invoke-FederatedSitePreparation {
     $c=Get-Content (Join-Path $work 'default/run.json') -Raw | ConvertFrom-Json
     if($c.extractionWorkers -ne 1 -or $c.requestedExtractionWorkers -ne 1 -or $c.connectionCheckTimeout -ne 180){throw 'Wrong sequential/startup defaults'}
     if(-not $c.test -or $c.mode -ne 'SelectedMethods' -or $c.priorVariance -ne 1){throw 'Wrong defaults'}
+    & $run -RunId odbcchoice -WorkDirectory $work -DbBackend odbc
+    $odbc=Get-Content (Join-Path $work 'odbcchoice/run.json') -Raw | ConvertFrom-Json
+    if($odbc.dbBackend -cne 'odbc'){throw 'Explicit ODBC backend was not stored in the worker config'}
+    if($c.PSObject.Properties['dbBackend']){throw 'Unset backend must allow Renviron selection'}
     foreach($limits in @(@{other=200},@{2=1},@{1=-1},@{3=2.5},@{2=$null},@{3=$true},@{severance=200})){
         $bad=$false;try{& $run -PatientLimits $limits -WorkDirectory $work}catch{$bad=$_.Exception.Message -match 'PatientLimits'}
         if(-not $bad){throw 'Invalid per-site limit accepted'}
@@ -94,7 +99,7 @@ function Invoke-FederatedSitePreparation {
     $i=0
     foreach($selection in $selections){
         $i++;$methods=$selection.Split(',');$id='choice'+$i
-        & $run -Methods $methods -Test $false -RunId $id -WorkDirectory $work -BlockSize 4 -Alpha 0.5 -PatientLimit 200 -PatientLimits @{2=100;3=300} -CacheDirectory (Join-Path $temp 'cache') -RebuildData
+        & $run -Methods $methods -Test $false -DbBackend odbc -RunId $id -WorkDirectory $work -BlockSize 4 -Alpha 0.5 -PatientLimit 200 -PatientLimits @{2=100;3=300} -CacheDirectory (Join-Path $temp 'cache') -RebuildData
         $out=Join-Path $work $id;$c=Get-Content (Join-Path $out 'run.json') -Raw | ConvertFrom-Json
         if($c.test -or $c.blockSize -ne 4 -or $c.alpha -ne 0.5 -or $c.patientLimits.'1' -ne 200 -or $c.patientLimits.'2' -ne 100 -or $c.patientLimits.'3' -ne 300 -or -not $c.rebuildData){throw 'Real routing/settings lost'}
         if(-not(Test-Path (Join-Path $out 'SUCCESS.txt'))){throw 'Missing success'}
@@ -103,7 +108,7 @@ function Invoke-FederatedSitePreparation {
         }
         if('federated' -in $methods){
             $f=Get-Content (Join-Path $out "federated-runtime/$id/forwarded.json") -Raw | ConvertFrom-Json
-            if($f.BlockSize -ne 4 -or $f.Alpha -ne 0.5 -or $f.Mode -ne 'Design'){throw 'Federated settings lost'}
+            if($f.DbBackend -cne 'odbc' -or $f.ConfigDirectory -cne (Join-Path $temp 'config') -or $f.BlockSize -ne 4 -or $f.Alpha -ne 0.5 -or $f.Mode -ne 'Design'){throw 'Federated settings lost'}
         }
     }
     $caught=$false

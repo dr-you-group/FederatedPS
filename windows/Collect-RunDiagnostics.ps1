@@ -24,7 +24,7 @@ $notes.Add('No database queries, heap dumps, RDS/Andromeda data or connection-se
 foreach ($relative in @(Get-RunDiagnosticFiles $context)) {
     if ($relative -eq 'run.json') {
         $safe=[ordered]@{}
-        foreach ($key in @('project','mode','test','dataset','runId','sites','careSites','study','scenario','blockSize','alpha',
+        foreach ($key in @('project','mode','test','dataset','dbBackend','runId','sites','careSites','study','scenario','blockSize','alpha',
             'tolerance','exchangeTimeout','initialTimeout','startupTimeout','runTimeout','dbQueryTimeout','smallQueryTimeout',
             'output','exchange','configDirectory','designDirectory')) {
             if ($context.Config.PSObject.Properties[$key]) { $safe[$key]=$context.Config.$key }

@@ -10,7 +10,7 @@ if (config$mode == "Database") {
     FederatedPs::getStudySettings(config$study, config$scenario)
     if (config$dataset == "YUHS") {
         fp_check_yuhs_sites(config)
-        invisible(fp_read_yuhs_connection(file.path(config$configDirectory, "yuhs.Renviron")))
+        invisible(fp_read_yuhs_connection(file.path(config$configDirectory, "yuhs.Renviron"), dbBackend = config$dbBackend))
     } else for (site in config$sites)
         invisible(fp_read_connection(file.path(config$configDirectory, paste0(site, ".Renviron"))))
 }
