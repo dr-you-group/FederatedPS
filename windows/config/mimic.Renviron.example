@@ -1,0 +1,7 @@
+# Windows-reachable PostgreSQL host (replace localhost if PostgreSQL is remote).
+PGHOST=127.0.0.1
+PGPORT=5432
+PGDATABASE=ohdsi
+PGUSER=
+PGPASSWORD=
+CDM_DATABASE_SCHEMA=mimiciv

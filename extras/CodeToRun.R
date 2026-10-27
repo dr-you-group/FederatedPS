@@ -1,3 +1,7 @@
+# Legacy PostgreSQL / start.py example. For native Windows/YUHS, configure
+# windows/config/yuhs.Renviron and run in a PowerShell Terminal instead:
+# .\windows\Run-YUHS.ps1 -Test $false -Study ppi -Scenario default
+# The Windows launcher starts the aggregator and all three hospital roles.
 library(FederatedPs)
 
 source("extras/ConnectionDetails.R")

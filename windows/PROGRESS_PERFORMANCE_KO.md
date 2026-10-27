@@ -1,0 +1,197 @@
+# FederatedPs 0.0.10: 전처리 우선 실행과 기관별 진행 상황
+
+최신 `sql-plan-4` 수정은 DB 연결 전에 SQL 전체를 준비하도록 R 패키지와 실행기를 함께 바꿉니다.
+Fresh 설치본에서는 패치 적용 후 `10_UPDATE_PACKAGE.ps1`로 FederatedPs를 재설치하십시오.
+Cyclops, R, Java, JDBC 재설치는 필요하지 않습니다. 적용 순서는
+[fresh/README_KO.md](fresh/README_KO.md)의 SQL 준비 정체 수정 절을 참조하십시오.
+이전 실행기만 바뀐 핫픽스의 설치 생략 안내는 이번 수정에 적용되지 않습니다.
+
+## 적용과 실행
+
+실행 중인 분석에는 새 코드가 소급 적용되지 않습니다. 현재 분석이 종료된 뒤
+R/RStudio를 닫고 ZIP을 별도 폴더에 풀어 적용합니다. 실행 중인 프로세스는 자동 종료하지 않습니다.
+
+```powershell
+& {
+    $ErrorActionPreference = 'Stop'
+    .\APPLY_UPDATE.ps1 -BundleRoot 'C:\FederatedPS_YUHS_Offline'
+    cd C:\FederatedPS_YUHS_Offline
+    .\05_RUN_YUHS.ps1 -Test $false `
+        -Study ppi -Scenario default `
+        -Methods local-only,pooled `
+        -PatientLimits @{1=200; 2=100; 3=300} `
+        -ExtractionWorkers 1 `
+        -ConnectionCheckTimeoutSeconds 180 `
+        -StatusSeconds 10
+}
+```
+
+- `-ExtractionWorkers 1`: 기본값입니다. 하나의 R 프로세스가 모든 기관의 전처리를 순서대로 완료한 뒤 모델을 계산합니다.
+  `2` 또는 `3`을 명시하면 기존 병렬 추출 경로를 사용합니다.
+  실행 수는 설정된 기관 수를 넘지 않으며, 1~3 범위에서 지정할 수 있습니다.
+  대기열은 숫자 site_id 오름차순입니다. `-Sites`를 명시하면 그 대기열 순서를 사용합니다.
+- `-StatusSeconds 10`: 상태 요약과 monitor.log를 10초마다 기록합니다. 기본값 15초.
+  화면 진행 표시와 경과 시간은 약 1초마다 갱신합니다. SQL 시작/완료 이벤트는 즉시 기록합니다.
+- `-NoProgress`: PowerShell 진행 막대만 끕니다. 상태 요약과 파일 로그는 계속 기록합니다.
+
+기본값 1에서는 단일 R 프로세스가 기관마다 JDBC 연결을 열어 순서대로 약제 후보 검색부터 CohortMethod, 공변량,
+최종 설계행렬 및 완료 캐시 생성까지 처리합니다. SQL Server의 `#` 임시 테이블은 연결별로 분리되고,
+로컬 SQL 로그·Andromeda 임시 파일·캐시·진행 이력도 기관별로 구분합니다. 새 R 패키지를 추가하지 않습니다.
+모든 기관의 완료 입력을 검증한 뒤 모델 계산을 시작합니다. local-only는 기관별 순차 학습,
+pooled는 같은 입력을 합쳐 한 번 학습하며, federated 선택 시 기존 분산 실행을 사용합니다.
+명시적 병렬 모드에서는 기관마다 독립된 R/JVM을 사용하며, 모든 추출 작업의 정상 종료 후 모델을 계산합니다.
+BLAS/OpenMP와 Cyclops의 기존 1-thread 설정을 유지해 기관 병렬화 위에 중첩 병렬화를 추가하지 않습니다.
+
+기관 작업이 실패하거나 제한 시간을 넘기면 이 실행에서 시작한 남은 작업을 정리하고 전체 실행을 실패 처리합니다.
+이미 정상 완료된 기관 캐시는 유지합니다. 다음 실행에서 같은 조건의 완료 캐시를 재사용합니다.
+모델 프로세스는 기관 작업이 지정한 정확한 캐시 세대를 읽으며, 준비 데이터가 손상/누락되면
+자동 재추출이나 다른 캐시로 대체하지 않고 오류를 보고합니다.
+
+## 실제 SQL 실행량 감소
+
+`sql-plan-4`는 전체 방문의 기관 소속 GROUP BY를 연구 약제 노출 후보와 다른 기관 방문
+존재 여부 검사로 바꿉니다. default는 기존과 같은 환자 상한을 방문 복사 전에 적용합니다.
+자세한 순서와 감사 집계 변경은 [STUDY_FIRST_EXTRACTION_KO.md](STUDY_FIRST_EXTRACTION_KO.md)를 보십시오.
+SQL이 실행 중일 때는 행 진행률을 알 수 없으므로 고정된 0% 막대 대신 경과/완료 문장 수를 표시합니다.
+
+## SQL 준비와 실제 조회 구분
+
+첫 JDBC 연결 전에 모든 기관의 SQL을 생성·분리합니다. 이때 `preparing-sql (no DB)`로 표시합니다.
+SitePartition, StudyConcepts, 노출/제한, CohortMethod, 공변량 SQL의 준비를 마친 뒤
+DB 확인과 추출을 시작합니다. 추출에서는 `Using prepared ...` 및 `SQL i/N`이 표시됩니다.
+준비 호출마다 60초의 독립 감시가 적용되며 `sql-prepare-watchdog.log`에 대기 시간을 남깁니다.
+이 제한은 실제 임상 쿼리에 적용하지 않습니다. 시간 초과 시 자동 재시도하지 않습니다.
+완료 캐시를 삭제하지 않지만 추출 소스 지문 변경으로 기존 캐시가 재사용되지 않을 수 있습니다.
+
+## 0/10 Connection self-check 장시간 대기 방지
+
+연결 생성·SELECT 1/세션 ID 확인·CARE_SITE 조회/검증 전체에 기관별
+`-ConnectionCheckTimeoutSeconds 180`의 외부 감시를 적용합니다. 첫 JDBC 연결 직전부터
+같은 시작 시각을 유지합니다. 초기 확인 쿼리는 자동으로 재시도하지 않습니다.
+R 초기 패키지 로딩 시간은 포함하지 않습니다. 병렬 모드와 `-ExtractionWorkers 1` 모두 적용됩니다.
+
+JDBC의 내부 쿼리/네트워크 제한이나 Java 호출이 멈추더라도 PowerShell이 별도로 감시합니다.
+초과 시 마지막 JDBC 단계와 시간 초과 기록을 저장하고, 가능한 경우 제한된 시간 내 JVM 스레드 덤프를
+수집한 뒤 이 실행의 작업들을 정리하여 실패로 종료합니다. 덤프/프로세스 정리 시간은 180초에 추가됩니다.
+`-NoProgress` 또는 화면 모니터 비활성화와 관계없이 감시합니다.
+
+초기 접속부터 `socketTimeout=75000`(기본)을 적용합니다. 각 JDBC 호출도
+`SmallQueryTimeoutSeconds + 15`초의 외부 감시를 받으며, 기본값은 75초입니다.
+연결 로그인에는 최소 45초의 호출 제한을 허용하되 전체 180초 제한은 유지합니다.
+확인 성공 뒤에만 임상 추출용 소켓 제한(기본 7215초)으로 전환합니다.
+`setMaxRows(2)`는 드라이버가 별도 `SET ROWCOUNT`를 전송하므로 제거했습니다.
+CARE_SITE는 `SELECT TOP (2)`로 제한하여 중복 행 검증을 유지합니다.
+
+`db-startup-watchdog.log`와 화면에는 site_id, 현재 JDBC 호출, 단계 경과 시간,
+제한 시간을 기록합니다. 이 제한은 ETA나 분석 진척률이 아닙니다.
+
+진행 이벤트는 `getNetworkTimeout`, `setNetworkTimeout`, `createStatement`, `setQueryTimeout`,
+`executeQuery`, `next`, 값 읽기, `close` 등 JDBC 호출 전후를 표시합니다.
+따라서 쿼리 실행 중인지, 반환 행 읽기인지, 리소스 정리인지 구분할 수 있습니다.
+로그에는 해당 호출 이름만 추가하며 환자 행이나 연결 비밀번호를 추가하지 않습니다.
+
+연결 확인 완료 후에는 이 제한이 해제됩니다. SitePartition·CohortMethod 등에는 기존의
+`-DbQueryTimeoutSeconds`(기본 7200초), 전체 분석에는 `-RunTimeoutSeconds`가 적용됩니다.
+180초 제한이 분석 데이터 추출을 끊지 않습니다. 캐시/합성 데이터 실행은 DB 확인 감시 대상이 아닙니다.
+
+시간 초과 시 실행 폴더의 `failure.txt`, `db-startup-timeout-<site_id>.json`,
+`shutdown-thread-<role>.txt`(생성된 경우), `extraction\<site_id>\db-startup-*.json`을 확인하십시오.
+기존 JDBC 쿼리 제한은 60초, 로그인 제한은 30초이며 SSL 설정은 바꾸지 않습니다.
+이는 프로그램이 초기 확인에서 무기한 대기하는 경로를 막고 대기 위치를 드러내는 수정입니다.
+실제 HIWARE 세션·네트워크·SQL Server의 장애를 자동 복구하거나 연결 성공을 보장하지 않습니다.
+[Microsoft의 JDBC timeout 구분](https://learn.microsoft.com/en-us/sql/connect/jdbc/understand-timeouts)을 참고하십시오.
+
+## 기관별 화면 읽기
+
+기관 이름은 설정 파일의 표시 이름을 읽으며, 모든 추적과 옵션의 기준은 숫자 site_id입니다.
+예시의 시간과 문장 수는 화면 설명용이며 실제 벤치마크가 아닙니다.
+
+```text
+[site_id=1 (...)] extracting | SitePartition.sql SQL 2/4: Index study-exposed candidates
+  extraction stage 1/10 | SQL done 1/4 (statements); current query rows unknown | elapsed 00:02:31
+[site_id=2 (...)] queued: extraction has not started
+[site_id=3 (...)] queued: extraction has not started
+```
+
+`queued`는 아직 시작하지 않은 상태입니다. `data-ready`는 추출과 캐시 저장 완료,
+`data-ready (cache)`는 기존 캐시 재사용, `data-ready (prepared)`는 기관 작업이 만든 입력을 모델 프로세스가 로드한 상태,
+`local-fitting`은 해당 기관 모델 학습, `local-complete`는 해당 모델 검증 완료입니다.
+pooled 작업은 공통 baselines 행에 표시됩니다. 최종 성공은 SUCCESS.txt로 판정합니다.
+
+SitePartition은 연구 약제 후보 검색, 후보 인덱스, 타기관 방문자 제외, 환자 인덱스의 4개 문장입니다.
+default의 환자 상한 적용 후 SiteVisits에서 방문 복사와 두 인덱스를 만드는 3개 문장을 실행합니다.
+CohortMethod 등도 실제 설치된 SQL을 SqlRender로 분리한 문장별 시작·완료를 표시합니다.
+SQL 문장 실행 순서와 JDBC의 기존 최종 커밋 경계는 유지합니다. 실패 시 재실행하지 않습니다.
+SQL 반환 시 드라이버가 제공한 영향 행 수 또는 조회 결과 행 수를 기록합니다.
+집계된 환자·방문 수 및 도메인별 연결 제외 건수도 확인되는 즉시 출력합니다.
+
+`1/10`은 추출 단계 번호, `SQL 1/4`는 현재 문장 번호이며 `done 0/4`는 완료 문장 수입니다.
+문장마다 비용이 다르므로 이 비율은 처리 행 수나 전체 소요 시간의 비율이 아닙니다.
+단일 GROUP BY/SELECT 실행 도중의 처리 행 수·처리율은 이 연결에서 제공되지 않습니다.
+경과 시간과 살아 있는 R 프로세스만으로 DB가 연산 중인지 잠금/I/O 대기 중인지 구분하지 않습니다.
+
+## ETA
+
+- 최초 실행 SQL: 같은 조건의 완료 기록이 없어 ETA가 없다는 이유를 표시합니다.
+- 같은 SQL·기관·DB 설정·study/scenario·환자 제한·동시 실행 수·패키지/드라이버 버전:
+  최근 최대 5개 정상 완료 기록의 중앙값으로 **현재 작업의** 예상 시간을 표시합니다.
+- 과거 예상 시간을 이미 넘긴 요청: `historical duration exceeded; remaining ETA unavailable`.
+  실행 중인데 ETA를 0초로 표시하지 않습니다.
+- CCD: 현재 sweep의 좌표 수와 속도로 추정한 ETA를 표시합니다. 전체 수렴 시간의 ETA가 아닙니다.
+- 전체 분석 ETA: 서로 다른 SQL 비용과 미정인 수렴 횟수 때문에 확정하지 않습니다.
+
+과거 기록은 예측 참고값이며 DB 부하·데이터 증가에 따라 실제 시간은 달라질 수 있습니다.
+이력은 `FederatedPS\work\progress-history`에 식별용 해시·시간만 저장합니다.
+SQL 본문·환자 행·접속 비밀번호는 이력에 저장하지 않습니다. 이력 손상은 분석 성공 여부에 영향을 주지 않습니다.
+
+## 적용한 성능 변경과 한계
+
+1. 전체 방문의 환자별 MIN/MAX 집계 대신 연구 약제 노출 후보에서 다른 양수 기관 방문의
+   존재 여부를 확인합니다. NULL/0/음수 및 설정 외 기관 ID를 다루는 선정 정책은 같습니다.
+2. default의 환자 상한을 방문 복사 전에 적용합니다. 기존과 동일한 사람을 선택하며
+   선택한 사람의 관련 이력은 모두 유지합니다. studySpecific의 상한 적용 순서는 유지합니다.
+3. `#fps_visit`에는 필요한 6개 열만 저장합니다. 전체 CDM 감사 집계는 NA로 명시하고,
+   후보/준비 환자 및 방문 연결성 집계에는 적용 범위를 기록합니다.
+
+원격 SQL Server의 부하는 Windows 분석 인스턴스의 CPU 사용률로 판별할 수 없습니다.
+기본 순차 추출을 유지하며, 동시 추출 2/3은 명시적으로 선택할 수 있습니다.
+초기 후보 조회와 기관 중복 검사는 여전히 원본 임상 테이블에 접근하므로 인덱스와 실제
+계획에 따라 느릴 수 있습니다. 실제 YUHS의 속도 배수와 메모리는 측정하지 않았습니다.
+원본 CDM 인덱스나 NOLOCK 힌트를 자동으로 적용하지 않습니다.
+
+## 로그 및 재사용
+
+- 병렬 추출 로그: `FederatedPS\work\methods\<RunId>\<site_id>\`의
+  `run.stdout.log`, `run.stderr.log`, `progress.jsonl`, `data-cache.json`, `preparation-complete.json`.
+- 모델 계산 로그: 같은 실행 폴더의 `baselines\`. 순차 모드에서는 추출 로그도 여기에 기록됩니다.
+- SQL 원문/문장 계획/소요 시간: `extraction\<site_id>\sql-diagnostics\`.
+  `*-plan.tsv`, `*.sql`, `operations.tsv`, `connection.tsv`를 함께 확인합니다.
+- 기관별 최신 상태: 각 로그 폴더의 `sites\<site_id>.json`.
+- 통합 상태 기록: 실행 폴더의 `monitor.log`.
+
+별도 창에서 읽기 전용으로 보기:
+
+```powershell
+.\FederatedPS\windows\Watch-FederatedRun.ps1 `
+    -RunDirectory 'C:\FederatedPS_YUHS_Offline\FederatedPS\work\methods\실제_RunId' `
+    -StatusSeconds 10
+```
+
+이 뷰어의 Ctrl+C는 분석을 종료하지 않습니다. 기존 프로세스에는 새 SQL 세부 이벤트가 생기지 않습니다.
+최신 실행기 핫픽스는 0.0.10 완료 캐시를 재사용합니다. 다만 최초 0.0.10 설치 시에는 소스 및 버전 지문이 달라 **v0.0.9 이하 캐시를 자동 재사용하지 않으며 최초 1회 재추출**합니다.
+이전 캐시를 삭제하지 않습니다. 이후 v0.0.10에서 조건이 같은 기관의 완료 캐시는 재사용됩니다.
+동시 실행 수(1/2/3)만 변경해도 캐시를 재사용하며, 작업 ETA 이력은 해당 동시 실행 수별로 구분합니다.
+SitePartition 중간 상태는 체크포인트가 아니므로 중단 후에는 해당 기관 추출을 다시 시작합니다.
+
+## 검증 범위
+
+Linux의 R 4.3.3 및 PowerShell 7에서 SQL 작업 순서/오류 전달/최종 커밋 호출,
+기관별 상태 및 ETA의 범위, 부분 로그 처리, 실제 프로세스의 1/2/3개 동시 실행 제한,
+모든 준비 완료 후 모델 실행, 정상 종료/완료 기록 검증, 실패 시 대기열 중단 및 프로세스 정리,
+환자 및 캐시 계약을 검사합니다. SQLite로 변환한 동치성 테스트에서 기존/새 기관 분할의
+환자·방문 행과 다기관 환자 집계를 비교합니다.
+Windows Server R 4.6.1, 실제 HIWARE 연결, SQL Server 실행 계획 및 네이티브 Cyclops를
+이 환경에서 통합 실행한 것은 아닙니다.
+
+공식 참고 자료: [R의 Windows 프로세스 병렬화](https://stat.ethz.ch/R-manual/R-devel/library/parallel/html/makeCluster.html),
+[Microsoft SQL Server 실행/대기 시간 진단](https://learn.microsoft.com/troubleshoot/sql/database-engine/performance/troubleshoot-slow-running-queries).

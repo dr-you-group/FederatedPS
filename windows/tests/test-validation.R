@@ -1,0 +1,47 @@
+# Base-R checks: Rscript --vanilla windows/tests/test-validation.R
+source("windows/common.R")
+source("R/Pda.R")
+source("R/BlockDesign.R")
+expect_error <- function(expr, pattern) {
+    error <- tryCatch({ force(expr); NULL }, error = identity)
+    stopifnot(inherits(error, "error"), grepl(pattern, conditionMessage(error)))
+}
+fp_check_names("run01", c("site1", "site2"))
+expect_error(fp_check_names("../run", c("site1", "site2")), "alphanumeric")
+expect_error(fp_check_names("run", c("site1", "SITE1")), "distinct")
+expect_error(fp_check_names("run", c("aggregator", "site2")), "reserved")
+stopifnot(.packetWidth(rep(0, 8), 1L, 2L, 3L) == 2L,
+          .packetWidth(rep(0, 4), 3L, 2L, 3L) == 1L)
+expect_error(.packetWidth(rep(0, 4), 1L, 2L, 3L), "Expected a 2-coordinate")
+expect_error(.packetWidth(rep(0, 4), 2L, 2L, 3L), "does not start")
+expect_error(.packetWidth(rep(0, 4), 1L, NA_integer_, NA_integer_), "before the specification")
+x <- matrix(0, 3, 2, dimnames = list(NULL, c("1", "2")))
+expect_error(fitPsDesign(x, c(0, 1), 1:3, control = list()), "same nonempty rows")
+colnames(x) <- c("1", "1")
+expect_error(fitPsDesign(x, c(0, 1, 0), 1:3, control = list()), "unique")
+# A missing field in a second site's settings must not inherit the first site's credentials.
+connection_file <- tempfile()
+writeLines(c("PGHOST=127.0.0.1", "PGPORT=5432", "PGDATABASE=example",
+             "PGUSER=reader", "CDM_DATABASE_SCHEMA=site1"), connection_file)
+Sys.setenv(PGPASSWORD = "synthetic-test-value")
+expect_error(fp_read_connection(connection_file), "Missing connection fields: PGPASSWORD")
+stopifnot(!nzchar(Sys.getenv("PGPASSWORD")))
+unlink(connection_file)
+
+source("windows/verify-results.R")
+output <- tempfile("results-")
+for (role in c("aggregator", "site1", "site2")) dir.create(file.path(output, role), recursive = TRUE)
+coefficients <- c("(Intercept)" = 0.1, "1000" = 0.3)
+saveRDS(coefficients, file.path(output, "aggregator", "result.rds"))
+population <- data.frame(rowId = 1:2, propensityScore = c(0.3, 0.7))
+attr(population, "metaData") <- list(psModelCoef = coefficients)
+for (site in c("site1", "site2")) saveRDS(population, file.path(output, site, "result.rds"))
+config <- list(mode = "Database", output = output, sites = c("site1", "site2"), runId = "run1")
+fp_verify_results(config)
+stopifnot(file.exists(file.path(output, "SUCCESS.txt")))
+attr(population, "metaData")$psModelCoef[2] <- 9
+saveRDS(population, file.path(output, "site2", "result.rds"))
+expect_error(fp_verify_results(config), "isTRUE")
+stopifnot(!file.exists(file.path(output, "SUCCESS.txt")))
+unlink(output, recursive = TRUE)
+cat("PASS: names, block packets, design dimensions, credential isolation and result validation\n")

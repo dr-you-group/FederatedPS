@@ -12,6 +12,8 @@
 #' @param control [Cyclops::createControl()] settings for Lange CPU CCD.
 #' @param startingCoefficients Common initial coefficients, intercept first.
 #' @param timeout Seconds to wait for each exchange.
+#' @param initialTimeout Seconds to wait during feature negotiation, including
+#'   database extraction at slower sites. Defaults to `timeout`.
 #' @return The input population with `propensityScore` and model coefficients
 #'   in its `metaData` attribute. Patient rows and PS remain at this hospital.
 #' @details Run `aggregatePs()` and one `fitPs()` call per hospital concurrently.
@@ -29,7 +31,8 @@ fitPs <- function(cohortMethodData, population = NULL, covariateIds = NULL,
                   priorVariance = 1,
                   control = Cyclops::createControl(convergenceType = "lange"),
                   startingCoefficients = rep(0, length(covariateIds) + 1L),
-                  timeout = 300) {
+                  timeout = 300, initialTimeout = timeout) {
+    .validateExchangeTimeouts(timeout, initialTimeout)
     if (!"aggregate" %in% names(formals(Cyclops::createControl))) {
         stop("Install the Cyclops fork pinned in DESCRIPTION")
     }
@@ -44,6 +47,7 @@ fitPs <- function(cohortMethodData, population = NULL, covariateIds = NULL,
         stop("Use alphanumeric run and hospital identifiers; total is reserved")
     }
     if (paste0(runId, "_0_", config$site_id) %in% pda::pdaList(config)) stop("Use a new runId")
+    .fpsProgress("model-input", "Preparing local model inputs and negotiating features")
     round <- 0L
     exchange <- function(coordinate, statistics) {
         key <- paste0(runId, "_", round)
@@ -54,7 +58,8 @@ fitPs <- function(cohortMethodData, population = NULL, covariateIds = NULL,
         }
         .putPs(list(coordinate = coordinate, statistics = statistics),
                paste0(key, "_", config$site_id), roundConfig)
-        result <- .getPs(paste0(key, "_total"), roundConfig, timeout)
+        result <- .getPs(paste0(key, "_total"), roundConfig,
+                         .exchangeWaitSeconds(coordinate, timeout, initialTimeout))
         round <<- round + 1L
         result
     }
@@ -86,7 +91,8 @@ fitPs <- function(cohortMethodData, population = NULL, covariateIds = NULL,
     reference <- merge(reference, analysis[c("analysisId", "analysisName", "domainId",
                                              "isBinary", "missingMeansZero")], by = "analysisId")
 
-    keep <- exchange(-1L, list(specification = list(features = features,
+    keep <- exchange(-1L, list(specification = list(protocol = .protocolVersion,
+        features = features,
         scales = unname(scales), priorVariance = priorVariance, control = unclass(control),
         startingCoefficients = unname(startingCoefficients),
         cohorts = attr(cohortMethodData, "metaData")[c("targetId", "comparatorId")],
@@ -101,11 +107,13 @@ fitPs <- function(cohortMethodData, population = NULL, covariateIds = NULL,
     prior <- Cyclops::createPrior("laplace", variance = priorVariance,
                                   exclude = "(Intercept)", useCrossValidation = FALSE)
     control$aggregate <- exchange
+    .fpsProgress("fitting", "Cyclops fitting; see aggregator for current-sweep progress")
     fit <- Cyclops::fitCyclopsModel(cyclopsData, prior = prior, control = control,
                                     startingCoefficients = startingCoefficients[c(TRUE, keep)])
     if (fit$return_flag != "SUCCESS") stop("Cyclops did not converge: ", fit$return_flag)
     coefficients <- stats::coef(fit)
     exchange(-2L, list(coefficients = unname(coefficients), iterations = fit$iterations))
+    .fpsProgress("predicting", "Computing local propensity scores")
     ps <- stats::predict(fit)
     if (!setequal(names(ps), rows) || any(!is.finite(ps)) || any(ps <= 0 | ps >= 1)) stop("Invalid prediction rows or values")
     population$propensityScore <- unname(ps[match(rows, names(ps))])

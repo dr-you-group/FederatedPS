@@ -10,10 +10,20 @@ at each hospital.
 Requirements
 ============
 
+For native Windows Server execution using the prepared offline R bundle, see
+[`windows/README_KO.md`](windows/README_KO.md). It includes offline installation,
+a no-database smoke test, concurrent Rscript roles, and RStudio Desktop setup.
+Docker and Python are not required for that workflow. The Windows database default is YUHS on SQL Server, partitioned by visit care-site IDs 1/2/3 (Severance, Gangnam, Yongin), with disjoint patients and visit-linked clinical records. The previous PostgreSQL datasets require `-Dataset Example`. See the Korean guide for the distinct exposure/feature definitions and exclusion policy.
+
+For the offline ODBC migration, see [`windows/ODBC_UPDATE_KO.md`](windows/ODBC_UPDATE_KO.md).
+The update's `RUN.ps1` uses ODBC after native and production connection probes
+both exit normally. SQL rendering still uses Java; database I/O uses the native
+Microsoft driver. Existing JDBC entry points remain selectable with `-DbBackend jdbc`.
+
 - R 4.1.0 or newer. Package dependencies are declared in `DESCRIPTION`, including
-  the required [Cyclops fork](https://github.com/dr-you-group/Cyclops) pinned to
+  the required [Cyclops fork](https://github.com/taseong/Cyclops) pinned to
   a specific commit.
-- Docker with Docker Compose and Python 3 for the included Web RStudio setup.
+- Docker with Docker Compose and Python 3 only for the included Web RStudio setup.
 - PostgreSQL OMOP CDM datasets, with read access to their clinical and vocabulary
   tables and permission to create session temporary tables. The study helpers
   use the layout produced by [CDM-loader](https://github.com/dr-you-group/CDM-loader):
@@ -23,6 +33,31 @@ Requirements
 The Docker image provides R 4.6.1, Java, the PostgreSQL JDBC driver and the
 required R packages.
 
+Proximal block CCD
+==================
+
+This branch adds a block variant of the coordinate descent. Each exchange carries the
+statistics of `blockSize` coordinates and the update is a damped proximal step (`alpha`), which
+cuts the number of communication rounds. The algorithm is in the Cyclops fork pinned in
+`DESCRIPTION` (`taseong/Cyclops@snu_proximal_ccd`); the package side is the block packet
+layout (protocol `fedps/2-block`) and `fitPsDesign()`.
+
+```r
+remotes::install_github("taseong/Cyclops@a08a9a8317a8ded49db77f6ff0394ab918b02a94")
+remotes::install_github("ts06068/FederatedPS@windows-server-offline")
+```
+
+Install Cyclops first: an existing Cyclops 3.7.1 counts as up to date, so the pin in
+`DESCRIPTION` alone does not replace it.
+
+```r
+control <- Cyclops::createControl(convergenceType = "lange", blockSize = 50, alpha = 0.5)
+```
+
+Every hospital uses the same `blockSize` and `alpha`; `blockSize = 1, alpha = 1` is the original
+algorithm. Experiment code and how to run it are in
+[`experiments/README.md`](experiments/README.md).
+
 Installation
 ============
 
@@ -30,7 +65,7 @@ To install the R package:
 
 ```r
 install.packages("remotes")
-remotes::install_github("dr-you-group/FederatedPS")
+remotes::install_github("ts06068/FederatedPS@windows-server-offline")
 ```
 
 Access to a private repository requires a `GITHUB_PAT` with read permission.
@@ -409,13 +444,13 @@ from Git.
 Development
 ===========
 
-Experimental (version 0.0.1). Tests use synthetic data in separate R processes
+Experimental (version 0.0.4). Tests use synthetic data in separate R processes
 to compare two- and three-site federated fits with pooled Cyclops, including
 row and feature alignment, matching, covariate balance and convergence handling.
 
 ```sh
 R CMD build .
-R CMD check FederatedPs_0.0.1.tar.gz
+R CMD check FederatedPs_0.0.4.tar.gz
 ```
 
 Building the PDF manual requires LaTeX. Use `R CMD check --no-manual` when it is
